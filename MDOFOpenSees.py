@@ -5,14 +5,17 @@
 # - openseespy, pandas, numpy, matplotlib
 ########################################################
 
-import MDOF_LU as mlu
+from ctypes import Union
 import matplotlib.pyplot as plt
 from cmath import pi
 from openseespy.opensees import *
 import pandas as pd
+import numpy as np
 import ReadRecord
 
 class MDOFOpenSees():
+
+    __g = 9.8
 
     # structrual parameters
     NStories : int = 0
@@ -21,6 +24,11 @@ class MDOFOpenSees():
     DampingRatio:float = 0.05
     HystereticCurveType: str = 'Elastic'
     HystereticParameters = ()
+
+    # pushover analysis results
+    # DriftHistory = {} # DriftHistory['time'] is the time list. DriftHistory[1] is the IDR list of 1st story
+    # ForceHistory = {} 
+    NodeDispHistory = {} # NodeDispHistory['time'], NodeDispHistory[1-N]
 
     # Dynamic analysis results
     MaxDrift = [] # MaxDrift[0] is the 1st story
@@ -31,6 +39,7 @@ class MDOFOpenSees():
     ForceHistory = {} 
     NodeAbsAccelHistory = {} # NodeAbsAccelHistory[0] is the ground
     NodeRelativeAccelHistory = {}
+
 
     def __init__(self, NStories :int, m: list, k:list, DampingRatio:float,
         HystereticCurveType: str, *HystereticParameters):
@@ -45,6 +54,7 @@ class MDOFOpenSees():
         #   -betai, overstrength ratio of ultimate strength to yield strength for each story
         #   -etai, hardening ratio for each story
         #   -DeltaCi, displacement threshold for complete damage state, m
+        #   -tao, degradation factor
         # }
 
         self.NStories = NStories
@@ -54,7 +64,81 @@ class MDOFOpenSees():
         self.HystereticCurveType = HystereticCurveType
         self.HystereticParameters = HystereticParameters
 
-    def DynamicAnalysis(self,ifprint: bool, EQRecordfile:str, GMScaling:float):
+    def StaticPushover(self, maxU: list = [0.10,-0.10,0], dU = 0.001,
+        CFloor = 'roof', ifprint: bool = True):
+        # Parameters:
+        # maxU - target disp (m).
+        # dU - Displacement increment (m)
+        # CFloor - controling floor. 
+        # 
+        # Returns:
+        # Iffinish, currentDisp
+        
+        if ifprint:
+            print('Pushover analysis of a MDOF lumped-mass building model with OpenSees...')
+        
+        self.__BuildModel(ifprint)
+
+        tsTag = 301
+        timeSeries('Linear', tsTag)
+        patternTag = 101
+        pattern('Plain', patternTag, tsTag)
+
+        # Create nodal loads
+        #    nd    FX  FY  MZ
+        for i in range(1,self.NStories+1):
+            load(i, i, 0.0, 0.0)
+
+        # recorders
+        recorder('Element', '-file', 'DriftHistory.txt', '-time',
+            '-ele', *list(range(1,self.NStories+1)), 'deformations')
+        recorder('Element', '-file', 'ForceHistory.txt', '-time',
+            '-ele', *list(range(1,self.NStories+1)), 'axialForce')
+        recorder('Node', '-file', 'NodeDispHistory.txt', '-time',
+            '-node', *list(range(1,self.NStories+1)), '-dof', 1, 'disp')
+        
+        # Perform analysis        
+        Tol = 1e-6
+        maxNumIter = 100
+        if isinstance(CFloor,str) & (CFloor == 'roof'):
+            CFloor = self.NStories
+        system('FullGeneral')
+        constraints('Transformation')
+        numberer('RCM')
+        test('NormDispIncr', Tol, maxNumIter)
+        algorithm('NewtonLineSearch') 
+
+        Test = {1:'NormDispIncr', 2: 'RelativeEnergyIncr', 3:'EnergyIncr', 
+            4: 'RelativeNormUnbalance',5: 'RelativeNormDispIncr', 6: 'NormUnbalance'}
+        Algorithm = {1:'KrylovNewton', 2: 'SecantNewton' , 3:'ModifiedNewton' , 
+            4: 'RaphsonNewton',5: 'PeriodicNewton', 6: 'BFGS', 7: 'Broyden', 8: 'NewtonLineSearch'}
+
+        currentDisp = 0.0
+        ok = 0
+
+        for i in range(len(maxU)):
+            while ok == 0 and abs(currentDisp-maxU[i])>dU:
+                numIter=100
+                integrator('DisplacementControl', CFloor, 1, 
+                    np.sign(maxU[i]-currentDisp)*dU, numIter)
+                analysis('Static')
+                ok = analyze(1)
+                # if the analysis fails try initial tangent iteration
+                if ok != 0:
+                    break
+                currentDisp = nodeDisp(CFloor, 1)
+
+        Iffinish = not ok
+
+        if ifprint:
+            print(f'State (Successful or Fault): {Iffinish:d}')
+        
+        wipe()
+        self.__ReadPushoverRecorderFiles()
+
+        return Iffinish, currentDisp
+        
+    def DynamicAnalysis(self, EQRecordfile:str, GMScaling:float, ifprint: bool = True):
         # Parameters:
         # -ifprint, true or false
         # -EQRecordfile, earthquake record file which is in PEER format, such as 'H-E12140'
@@ -66,106 +150,14 @@ class MDOFOpenSees():
         if ifprint:
             print('Perform dynamic analysis of a MDOF lumped-mass building model with OpenSees...')
 
-        wipe()						
-        model('basic', '-ndm', 2, '-ndf', 3)
+        self.__BuildModel(ifprint)
 
-        dof1 = 1
-        dof2 = 2
-        dof3 = 3
-        g = 9.8
-        floorLength = 1.0
-
-        # node
-        node(0, 0., 0.)
-        fix(0, 1, 1, 1) 
-        for i in range(self.NStories):
-            node(i+1, (i+1)*floorLength, 0.)
-            mass(i+1, self.m[i], 0., 0.)
-            fix(i+1, 0, 1, 1) 
-        
-        # material
-        E = 1.0
-        matTag = [i+1 for i in range(self.NStories)]
-        A = [0] * self.NStories
-        for i in range(self.NStories):
-            A[i] = self.k[i] * floorLength / E
-            # *HystereticParameters = (Vyi, betai, etai, DeltaCi, tao)
-            if self.HystereticCurveType == 'Elastic':
-                uniaxialMaterial(self.HystereticCurveType, matTag[i], E)
-            elif self.HystereticCurveType in ['Modified-Clough','Kinematic hardening','Pinching']:
-                Vyi = self.HystereticParameters[0][i]
-                betai = self.HystereticParameters[1][i]
-                etai = self.HystereticParameters[2][i]
-                DeltaCi = self.HystereticParameters[3][i]
-                s1p = Vyi / A[i] / E  # yield stress
-                e1p = s1p / E    # yield strain
-                s2p = s1p * betai
-                e2p = e1p + (s2p-s1p) / (etai * E)
-                s3p = s2p
-                e3p = DeltaCi/floorLength
-                if self.HystereticCurveType == 'Modified-Clough':
-                    uniaxialMaterial('Hysteretic', matTag[i], 
-                        s1p, e1p, s2p, e2p, s3p, e3p, 
-                        -s1p, -e1p, -s2p, -e2p, -s3p, -e3p, 0.5, 0.5, 
-                        0, 0, 0.0)
-                elif self.HystereticCurveType == 'Kinematic hardening':
-                    uniaxialMaterial('Hysteretic', matTag[i], 
-                        s1p, e1p, s2p, e2p, s3p, e3p, 
-                        -s1p, -e1p, -s2p, -e2p, -s3p, -e3p, 0.0, 1.0, 
-                        0.0, 0.0, 0.0)
-                elif self.HystereticCurveType == 'Pinching':
-                    tao = self.HystereticParameters[4]
-                    py = tao
-                    px = 1.0 - py
-                    uniaxialMaterial('Hysteretic', matTag[i], 
-                        s1p, e1p, s2p, e2p, s3p, e3p, 
-                        -s1p, -e1p, -s2p, -e2p, -s3p, -e3p, px, py, 
-                        0, 0, 0.0)
-            else:
-                print('Error: incorrect Hysteretic Curve Type')
-                return
-
-        # element
-        for i in range(self.NStories):
-            element('Truss', i+1, i,i+1, A[i], matTag[i])
-
-        # Eigenvalue Analysis     
-        lambdaN = eigen('-fullGenLapack', 2)
-        w1 = lambdaN[0]**0.5
-        w2 = lambdaN[1]**0.5
-        T1 =  2.0*pi/w1
-        T2 =  2.0*pi/w2
-        if ifprint:
-            print(f'Eigen Analysis: T1 = {T1:.2f} s; T2 = {T2:.2f} s')
-
-        # define & apply damping
-        # RAYLEIGH damping parameters, Where to put M/K-prop damping, switches 
-        # (http://opensees.berkeley.edu/OpenSees/manuals/usermanual/1099.htm)
-        # D=$alphaM*M + $betaKcurr*Kcurrent + $betaKcomm*KlastCommit + $beatKinit*$Kinitial
-        xDamp = self.DampingRatio;         
-        MpropSwitch = 1.0
-        KcurrSwitch = 0.0
-        KcommSwitch = 0.0
-        KinitSwitch = 1.0
-        nEigenI = 1 
-        nEigenJ = 2 
-        lambdaI = lambdaN[nEigenI-1] 
-        lambdaJ = lambdaN[nEigenJ-1] 
-        omegaI = lambdaI**0.5
-        omegaJ = lambdaJ**0.5
-        alphaM = MpropSwitch*xDamp*(2.0*omegaI*omegaJ)/(omegaI+omegaJ)
-        betaKcurr = KcurrSwitch*2.*xDamp/(omegaI+omegaJ)      # current-K;      +beatKcurr*KCurrent
-        betaKcomm = KcommSwitch*2.*xDamp/(omegaI+omegaJ)      # last-committed K;   +betaKcomm*KlastCommitt
-        betaKinit = KinitSwitch*2.*xDamp/(omegaI+omegaJ)      # initial-K;     +beatKinit*Kini
-        rayleigh(alphaM,betaKcurr, betaKinit, betaKcomm)       
-        
         # Permform the conversion from SMD record to OpenSees record
         dt, nPts = ReadRecord.ReadRecord(EQRecordfile +'.at2', EQRecordfile +'.dat')
 
-        
         # Uniform EXCITATION: acceleration input
         tsTag = 100
-        timeSeries('Path', tsTag, '-dt', dt, '-filePath', EQRecordfile +'.dat', '-factor', g * GMScaling)
+        timeSeries('Path', tsTag, '-dt', dt, '-filePath', EQRecordfile +'.dat', '-factor', self.__g * GMScaling)
         IDloadTag = 400			# load tag
         GMdirection = 1
         pattern('UniformExcitation', IDloadTag, GMdirection, '-accel', tsTag)
@@ -233,7 +225,7 @@ class MDOFOpenSees():
             print(f'The analysis ends at {tCurrent:.3f} sec out of {TotalTime:.3f} sec.')
         
         wipe()
-        self.__ReadRecorderFiles()
+        self.__ReadDynamicRecorderFiles()
 
         return Iffinish, tCurrent, TotalTime
 
@@ -242,7 +234,127 @@ class MDOFOpenSees():
         ax.plot(self.DriftHistory[NumOfStory],self.ForceHistory[NumOfStory]); 
         plt.show()
 
-    def __ReadRecorderFiles(self):
+    def __BuildModel(self, ifprint: bool):
+        # define building model
+
+        wipe()			
+        model('basic', '-ndm', 2, '-ndf', 3)
+
+        storyLength = 1.0
+
+        # node
+        node(0, 0., 0.)
+        fix(0, 1, 1, 1) 
+        for i in range(self.NStories):
+            node(i+1, (i+1)*storyLength, 0.)
+            mass(i+1, self.m[i], 0., 0.)
+            fix(i+1, 0, 1, 1) 
+        
+        # material
+        E = 1.0
+        matTag = [i+1 for i in range(self.NStories)]
+        A = [0] * self.NStories
+        for i in range(self.NStories):
+            A[i] = self.k[i] * storyLength / E
+            # *HystereticParameters = (Vyi, betai, etai, DeltaCi, tao)
+            if self.HystereticCurveType == 'Elastic':
+                uniaxialMaterial(self.HystereticCurveType, matTag[i], E)
+            elif self.HystereticCurveType in ['Modified-Clough','Kinematic hardening','Pinching']:
+                Vyi = self.HystereticParameters[0][i]
+                betai = self.HystereticParameters[1][i]
+                etai = self.HystereticParameters[2][i]
+                DeltaCi = self.HystereticParameters[3][i]
+                s1p = Vyi / A[i] / E  # yield stress
+                e1p = s1p / E    # yield strain
+                s2p = s1p * betai
+                e2p = e1p + (s2p-s1p) / (etai * E)
+                s3p = s2p*1.001
+                e3p = DeltaCi/storyLength
+                if e3p < e2p:
+                    print('WARNING: the drift of complete damage is smaller than ultimate drift')
+                    e2p = e3p
+                    s2p = (e2p - e1p)*(etai * E) + s1p
+                    s3p = s2p*1.001
+                    e3p = e2p*1.1
+                if self.HystereticCurveType == 'Modified-Clough':
+                    uniaxialMaterial('Hysteretic', matTag[i], 
+                        s1p, e1p, s2p, e2p, s3p, e3p, 
+                        -s1p, -e1p, -s2p, -e2p, -s3p, -e3p, 0.5, 0.5, 
+                        0, 0, 0.0)
+                elif self.HystereticCurveType == 'Kinematic hardening':
+                    uniaxialMaterial('Hysteretic', matTag[i], 
+                        s1p, e1p, s2p, e2p, s3p, e3p, 
+                        -s1p, -e1p, -s2p, -e2p, -s3p, -e3p, 0.001, 0.999, 
+                        0.0, 0.0, 0.0)
+                elif self.HystereticCurveType == 'Pinching':
+                    tao = self.HystereticParameters[4]
+                    if tao == 0:
+                        tao = 0.001
+                    elif tao == 1:
+                        tao = 0.999
+                    else:
+                        pass
+                    py = tao
+                    px = 1.0 - py
+                    uniaxialMaterial('Hysteretic', matTag[i], 
+                        s1p, e1p, s2p, e2p, s3p, e3p, 
+                        -s1p, -e1p, -s2p, -e2p, -s3p, -e3p, px, py, 
+                        0, 0, 0.0)
+            else:
+                print('Error: incorrect Hysteretic Curve Type')
+                return
+
+        # element
+        for i in range(self.NStories):
+            element('Truss', i+1, i,i+1, A[i], matTag[i])
+
+        # Eigenvalue Analysis   
+        if self.NStories>1:  
+            lambdaN = eigen('-fullGenLapack', 2)
+            w1 = lambdaN[0]**0.5
+            w2 = lambdaN[1]**0.5
+            T1 =  2.0*pi/w1
+            T2 =  2.0*pi/w2
+            if ifprint:
+                print(f'Eigen Analysis: T1 = {T1:.2f} s; T2 = {T2:.2f} s')
+        else:
+            lambdaN = eigen('-fullGenLapack', 1)
+            w1 = lambdaN[0]**0.5
+            T1 =  2.0*pi/w1
+            if ifprint:
+                print(f'Eigen Analysis: T1 = {T1:.2f} s')
+
+        # define & apply damping
+        # RAYLEIGH damping parameters, Where to put M/K-prop damping, switches 
+        # (http://opensees.berkeley.edu/OpenSees/manuals/usermanual/1099.htm)
+        # D=$alphaM*M + $betaKcurr*Kcurrent + $betaKcomm*KlastCommit + $beatKinit*$Kinitial
+        if self.NStories>1: 
+            xDamp = self.DampingRatio;  
+            MpropSwitch = 1.0
+            KcurrSwitch = 0.0
+            KcommSwitch = 0.0
+            KinitSwitch = 1.0
+            nEigenI = 1 
+            nEigenJ = 2 
+            lambdaI = lambdaN[nEigenI-1] 
+            lambdaJ = lambdaN[nEigenJ-1] 
+            omegaI = lambdaI**0.5
+            omegaJ = lambdaJ**0.5
+            alphaM = MpropSwitch*xDamp*(2.0*omegaI*omegaJ)/(omegaI+omegaJ)
+            betaKcurr = KcurrSwitch*2.*xDamp/(omegaI+omegaJ)      # current-K;      +beatKcurr*KCurrent
+            betaKcomm = KcommSwitch*2.*xDamp/(omegaI+omegaJ)      # last-committed K;   +betaKcomm*KlastCommitt
+            betaKinit = KinitSwitch*2.*xDamp/(omegaI+omegaJ)      # initial-K;     +beatKinit*Kini
+            rayleigh(alphaM,betaKcurr, betaKinit, betaKcomm)       
+        else:
+            xDamp = self.DampingRatio;  
+            MpropSwitch = 1.0
+            nEigenI = 1 
+            lambdaI = lambdaN[nEigenI-1] 
+            omegaI = lambdaI**0.5
+            alphaM = MpropSwitch*xDamp*2.0*omegaI
+            rayleigh(alphaM, 0, 0, 0)  
+
+    def __ReadDynamicRecorderFiles(self):
 
         self.MaxDrift = pd.read_table('MaxDrift.txt', sep='\s+', header=None).loc[2,:]
         self.MaxAbsAccel = pd.read_table('MaxAbsAccel.txt', sep='\s+', header=None).loc[2,:]
@@ -272,11 +384,22 @@ class MDOFOpenSees():
         for i in range(self.NStories):
             self.NodeRelativeAccelHistory[i+1] = df.loc[:,i+1]
 
-bld = mlu.MDOF_LU(3, 1000, 'C1M')
-bld.OutputStructuralParameters('structural parameters')
+    def __ReadPushoverRecorderFiles(self):
 
-fe = MDOFOpenSees(3, [bld.mass]*bld.N, [bld.K0]*bld.N, bld.DampingRatio,
-    bld.HystereticCurveType, bld.Vyi, bld.betai, bld.etai, bld.DeltaCi)
-fe.DynamicAnalysis(1, 'H-E12140', 1.0)
+        df = pd.read_table('DriftHistory.txt', sep='\s+', header=None)
+        self.DriftHistory = {}
+        self.DriftHistory['time'] = df.loc[:,0]
+        for i in range(self.NStories):
+            self.DriftHistory[i+1] = df.loc[:,i+1]
 
-fe.PlotForceDriftHistory(1)
+        df = pd.read_table('ForceHistory.txt', sep='\s+', header=None)
+        self.ForceHistory = {}
+        self.ForceHistory['time'] = df.loc[:,0]
+        for i in range(self.NStories):
+            self.ForceHistory[i+1] = df.loc[:,i+1]
+
+        df = pd.read_table('NodeDispHistory.txt', sep='\s+', header=None)
+        self.NodeDispHistory = {}
+        self.NodeDispHistory['time'] = df.loc[:,0]
+        for i in range(self.NStories):
+            self.NodeDispHistory[i+1] = df.loc[:,i+1]

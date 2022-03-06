@@ -140,6 +140,10 @@ class MDOF_LU:
             self.HystereticCurveType = 'Pinching'
             self.tao = kappa
 
+    def set_DesignLevel(self, DesignLevel: str):
+        self.__SeismicDesignLevel = DesignLevel
+        self.__init__(self.NumOfStories,self.FloorArea,self.StructuralType)
+
     def OutputStructuralParameters(self, filename):
 
         data = {
