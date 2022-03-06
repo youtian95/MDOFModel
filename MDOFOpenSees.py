@@ -24,6 +24,7 @@ class MDOFOpenSees():
     DampingRatio:float = 0.05
     HystereticCurveType: str = 'Elastic'
     HystereticParameters = ()
+    SelfCenteringEnhancingFactor = 0.0 # 0-1
 
     # pushover analysis results
     # DriftHistory = {} # DriftHistory['time'] is the time list. DriftHistory[1] is the IDR list of 1st story
@@ -300,13 +301,25 @@ class MDOFOpenSees():
                         s1p, e1p, s2p, e2p, s3p, e3p, 
                         -s1p, -e1p, -s2p, -e2p, -s3p, -e3p, px, py, 
                         0, 0, 0.0)
+                
+                if (self.SelfCenteringEnhancingFactor > 0) & (self.SelfCenteringEnhancingFactor <= 1):
+                    matTag_MultiLinear = 1000+matTag[i]
+                    uniaxialMaterial('ElasticMultiLinear', matTag_MultiLinear, 
+                        0.0, '-strain', -e3p,-e2p,-e1p,e1p,e2p,e3p, 
+                        '-stress', -s3p,-s2p,-s1p,s1p,s2p,s3p)
+                    matTag_Parallel = 2000+matTag[i]
+                    uniaxialMaterial('Parallel', matTag_Parallel, matTag[i], matTag_MultiLinear, 
+                        '-factors', 1.0-self.SelfCenteringEnhancingFactor,self.SelfCenteringEnhancingFactor)
             else:
                 print('Error: incorrect Hysteretic Curve Type')
                 return
 
         # element
         for i in range(self.NStories):
-            element('Truss', i+1, i,i+1, A[i], matTag[i])
+            if (self.SelfCenteringEnhancingFactor > 0) & (self.SelfCenteringEnhancingFactor <= 1):
+                element('Truss', i+1, i,i+1, A[i], 2000+matTag[i])
+            else:
+                element('Truss', i+1, i,i+1, A[i], matTag[i])
 
         # Eigenvalue Analysis   
         if self.NStories>1:  
