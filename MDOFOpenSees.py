@@ -1,5 +1,5 @@
 ########################################################
-# Perform dynamic analysis using Openseespy 
+# Perform dynamic analysis using Openseespy. SI unit
 # 
 # Dependancy: 
 # - openseespy, pandas, numpy, matplotlib

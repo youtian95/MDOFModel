@@ -1,0 +1,35 @@
+Default Full Structure Replacement Cost,,
+Specific Occupancy,Means Model Description (Means Model Number),Structure Replacement Costl/sq.ft (2018)
+RES1,See Table 6-3,
+RES2,"u.s.Census Bureau 2016 Manufactured Housing Survey Annual Data, see Table 6-6 (West data is shown here)",$63.61
+RES3A,"SFR Avg two-story,MF adj??2,200 sq.ft",$124.25
+RES3B,"SFR Avg 2 1/2 story,MF adj,4,400 sq.ft",$109.66
+RES3C,"Apt., 1-3 stories,8,000 sq.ft (M.010)",$201.33
+RES3D,"Apt.??1-3 stories??15,000 sq.ft(M.010)",$187.75
+RES3E,"Apt.,4-7 stories,40,000 sq.ft (M.O20)",$188.48
+RES3F,"Apt.,4-7 stories,80,000 sq.ft(M.020)",$174.53
+RES4,"Hotel,4-7 stories,135,000 sq.ft (M.350)",$182.28
+RES5,"College Dorm,2-3 stories,25,000 sq.ft (M.130)",$199.63
+RES6,"Nursing Home,two-story,25,000 sq.ft (M.450)",$215.91
+COM1,"Store,Dept.,one-story,110,000 sq.ft (M.610)",$114.47
+COM2,"Warehouse,30,000 sq.ft(M.690)",$120.00
+COM3,"Garage,Repair,10,000 sq.ft (M.290)",$139.88
+COM4,"Office,5-10 stories,8o,000 sq.ft(M.470)",$176.29
+COM5,"Bank,one-story,4,100 sq.ft (M.050)",$261.33
+COM6,"Hospital,2-3 stories,55,000 sq.ft (M.330)",$302.35
+COM7,"Medical office,two-story,7,000 sq.ft(M.410)",$226.54
+COM8,"Restaurant,one-story,5,000 sq.ft (M.530)",$227.53
+COM9,"Movie Theatre,12,000 sq.ft (M.440)",$190.95
+COM10,"Garage,Pkg,five-story,145,000 sq.ft(M.270)",$80.59
+IND1,"Factory,one-story,30,000 sq.ft (M.200)",$133.03
+IND2,"Warehouse,30,000 sq.ft (M.690)",$120.00
+IND3,"College Lab, one-story,45,000 sq.ft (M.150)",$180.47
+IND4,"College Lab, one-story,45,000 sq.ft(M.150)",$180.47
+IND5,"College Lab, one-story,45,000 sq.ft(M.150)",$180.47
+IND6,"Warehouse,30,000 sq.ft (M.690)",$120.00
+AGR1,"Warehouse,30,000 sq.ft (M.690)",$120.00
+REL1,"Church, one-story, 17,000 sq.ft (M.090)",$190.53
+GOV1,"Town Hall, one-story, 11,000 sq.ft (M.670)",$149.83
+GOV2,"Police Station, two-story, 11,000 sq.ft (M.490)",$254.23
+EDU1,"School, High, 130,000 sq.ft (M.570)",$201.63
+EDU2,"College Class. 2-3 stories, 50,000 sq.ft (M.120)",$171.05

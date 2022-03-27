@@ -112,7 +112,7 @@ class MDOF_LU:
         SDy = self.mass * SAy / self.K0
         SDu = SDy * lambda_ * miu
         ISDR_threshold = HazusDataTable5_9.loc[self.StructuralType,
-            (self.__SeismicDesignLevel,'Interstory Drift at Threshold of Damage State','-','Complete')]
+            (self.__SeismicDesignLevel,'Interstory Drift at Threshold of Damage State','Median','Complete')]
         kappa = HazusDataTable5_18.loc[self.StructuralType,
             (self.__SeismicDesignLevel,self.__EQDuration)]
         Height_feet = HazusDataTable5_1['typical height to roof (feet)'][self.StructuralType]

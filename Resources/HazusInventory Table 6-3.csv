@@ -1,0 +1,18 @@
+Replacement Costs (and Basement Adjustment) for RES1 Structures,,,,
+Means Construct.Class,Height Class,Average Base cost per sq.ft,Adjustment for Finished Basement (cost sq.ft of main str.),Adjustment for Unfinished Basement (costl sq.ft of main str.)
+Economy,One-story,$97.61,$26.45,$9.55
+Economy,Two-story,$104.04,$15.20,$6.30
+Economy,Three-story,$104.04,$15.20,$6.30
+Economy,Split level,$96.69,$15.20,$6.30
+Average,One-story,$116.66,$32.80,$11.25
+Average,Two-story,$122.75,$21.05,$7.40
+Average,Three-story,$127.94,$16.65,$5.80
+Average,Split level,$113.66,$21.05,$7.40
+Custom,One-story,$159.51,$53.65,$21.65
+Custom,Two-story,$163.95,$30.90,$12.90
+Custom,Three-story,$168.69,$22.55,$9.60
+Custom,Split level,$153.15,$30.90,$12.90
+Luxury,One-story,$188.84,$59.00,$22.65
+Luxury,Two-story,$194.94,$34.55,$13.85
+Luxury,Three-story,$201.09,$25.50,$10.40
+Luxury,Split level,$181.61,$34.55,$13.85
