@@ -12,13 +12,13 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "args": [
-                "--NumofStories",  "3",
-                "--FloorArea", "14709",
-                "--StructuralType", "S1L",
-                "--OccupancyClass", "RES3",
-                "--EQRecordFile", "H-E12140",
-                "--EQScaling", "3",
-                "--OutputDir", "Results"
+                "--NumofStories",  "2",
+                "--FloorArea", "8118",
+                "--StructuralType", "C1",
+                "--OccupancyClass", "COM1",
+                "--EQRecordFile", "E:/CityResilienceAndResilientStructure/EQData/SW4_2019/SW4/S_20_28" ,
+                "--EQScaling", "1",
+                "--DesignLevel", "high-code"
             ]
         }
     ]

@@ -1,6 +1,6 @@
 Building Recovery Time (in Days),,,,,,
-No.,Label,Structural Damage State,,,,
-,,None,Slight,Moderate,Extensive ,Complete
+,,Structural Damage State,,,,
+No.,Label,None,Slight,Moderate,Extensive ,Complete
 1,RES1,0,5,120,360,720
 2,RES2,0,5,20,120,240
 3,RES3A,0,10,120,480,960

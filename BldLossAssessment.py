@@ -65,7 +65,7 @@ class BldLossAssessment:
 
         self.NumOfStories = NumOfStories
         self.FloorArea = FloorArea
-        self.StructuralType = StructuralType
+        self.__Read_StructuralType(StructuralType)
         self.SeismicDesignLevel = DesignLevel
         self.OccupancyClass = OccupancyClass
 
@@ -90,6 +90,41 @@ class BldLossAssessment:
         self.__Estimate_RepairCost()
         self.__Estimate_RepairTime()
 
+
+    def __Read_StructuralType(self,StructuralType):
+        HazusInventoryTable4_2 = pd.read_csv("./Resources/HazusInventory Table 4-2.csv",
+            index_col=0, header=0)
+        rownames = HazusInventoryTable4_2.index.to_list()
+        rownames_NO_LMH = rownames.copy()
+        for i in range(0,len(rownames)):
+            if rownames[i][-1] in 'LMH':
+                rownames_NO_LMH[i] = rownames[i][:-1]
+
+        if StructuralType in rownames:
+            self.StructuralType = StructuralType
+        elif StructuralType in rownames_NO_LMH:
+            ind = [i for i in range(0,len(rownames_NO_LMH)) if StructuralType==rownames_NO_LMH[i]]
+            storyrange = HazusInventoryTable4_2.iloc[ind]['story range'].values.tolist()
+            for i in range(0,len(storyrange)):
+                if '~' in storyrange[i]:
+                    Story_low = int(storyrange[i].split('~')[0])
+                    Story_high = int(storyrange[i].split('~')[1])
+                elif storyrange[i]=='all':
+                    Story_low = 1
+                    Story_high = float('inf')
+                elif '+' in storyrange[i]:
+                    Story_low = int(storyrange[i][:-1])
+                    Story_high = float('inf')
+                else:
+                    Story_low = int(storyrange[i])
+                    Story_high = int(storyrange[i])
+                if self.NumOfStories>=Story_low and self.NumOfStories<=Story_high:
+                    self.StructuralType = rownames[ind[i]]
+                    break
+
+        else:
+            self.StructuralType = StructuralType + ' is UNKNOWN'
+
     def __Read_StructureReplacementCost(self):
         HazusInventoryTable6_2 = pd.read_csv("./Resources/HazusInventory Table 6-2.csv",
             index_col=0, header=1)
@@ -97,7 +132,7 @@ class BldLossAssessment:
             HazusInventoryTable6_3 = pd.read_csv("./Resources/HazusInventory Table 6-3.csv",
                 index_col=[0,1], header=1)
             assert self.NumOfStories<=3
-            HeightClass = ['One-story','Two-story','Three-story'][self.NumOfStories]
+            HeightClass = ['One-story','Two-story','Three-story'][self.NumOfStories-1]
             RCPersqft = HazusInventoryTable6_3.loc[('Average',HeightClass),'Average Base cost per sq.ft'] 
         else:
             RCPersqft = HazusInventoryTable6_2.loc[self.OccupancyClass,'Structure Replacement Costl/sq.ft (2018)']
@@ -116,10 +151,13 @@ class BldLossAssessment:
     def __Read_RepairCostRatios(self):
         HazusTable15_2 = pd.read_csv("./Resources/HazusData Table 15.2.csv",
             index_col=1, header=2)
+        HazusTable15_2 = HazusTable15_2.drop(['No.'], axis=1)
         HazusTable15_3 = pd.read_csv("./Resources/HazusData Table 15.3.csv",
             index_col=1, header=2)
+        HazusTable15_3 = HazusTable15_3.drop(['No.'], axis=1)
         HazusTable15_4 = pd.read_csv("./Resources/HazusData Table 15.4.csv",
             index_col=1, header=2)
+        HazusTable15_4 = HazusTable15_4.drop(['No.'], axis=1)
         self.StructureRCRatio_DS = HazusTable15_2.loc[self.OccupancyClass].values.tolist()
         self.AccelSenNonstructRCRatio_DS = HazusTable15_3.loc[self.OccupancyClass].values.tolist()
         self.DriftSenNonstructRCRatio_DS = HazusTable15_4.loc[self.OccupancyClass].values.tolist()
@@ -127,10 +165,13 @@ class BldLossAssessment:
     def __Read_RepairTime_DS(self):
         HazusData4_2_Table11_7 = pd.read_csv("./Resources/HazusData4-2 Table 11-7.csv",
             index_col=1, header=2)
+        HazusData4_2_Table11_7 = HazusData4_2_Table11_7.drop(['No.'], axis=1)
         HazusData4_2_Table11_8 = pd.read_csv("./Resources/HazusData4-2 Table 11-8.csv",
             index_col=1, header=2)
+        HazusData4_2_Table11_8 = HazusData4_2_Table11_8.drop(['No.'], axis=1)
         HazusData4_2_Table11_9 = pd.read_csv("./Resources/HazusData4-2 Table 11-9.csv",
             index_col=1, header=2)
+        HazusData4_2_Table11_9 = HazusData4_2_Table11_9.drop(['No.'], axis=1)
         self.RepairTime_DS = HazusData4_2_Table11_7.loc[self.OccupancyClass].values.tolist()
         self.RecoveryTime_DS = HazusData4_2_Table11_8.loc[self.OccupancyClass].values.tolist()
         self.FunctionLossMultipliers = HazusData4_2_Table11_9.loc[self.OccupancyClass].values.tolist()

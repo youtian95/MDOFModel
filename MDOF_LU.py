@@ -46,7 +46,9 @@ class MDOF_LU:
         self.N = NumOfStories
         self.NumOfStories = NumOfStories
         self.FloorArea = FloorArea
-        self.StructuralType = StructuralType
+        self.__Read_StructuralType(StructuralType)
+
+        self.__Update_DesignLevel()
 
         # read hazus data
         HazusDataTable5_5 = pd.read_csv("./Resources/HazusData Table 5.5.csv",
@@ -173,6 +175,50 @@ class MDOF_LU:
         }
         pd.DataFrame(data).to_csv(filename +'.csv',index=0,sep=',',mode='a')
 
+    def __Read_StructuralType(self,StructuralType):
+        HazusInventoryTable4_2 = pd.read_csv("./Resources/HazusInventory Table 4-2.csv",
+            index_col=0, header=0)
+        rownames = HazusInventoryTable4_2.index.to_list()
+        rownames_NO_LMH = rownames.copy()
+        for i in range(0,len(rownames)):
+            if rownames[i][-1] in 'LMH':
+                rownames_NO_LMH[i] = rownames[i][:-1]
 
+        if StructuralType in rownames:
+            self.StructuralType = StructuralType
+        elif StructuralType in rownames_NO_LMH:
+            ind = [i for i in range(0,len(rownames_NO_LMH)) if StructuralType==rownames_NO_LMH[i]]
+            storyrange = HazusInventoryTable4_2.iloc[ind]['story range'].values.tolist()
+            for i in range(0,len(storyrange)):
+                if '~' in storyrange[i]:
+                    Story_low = int(storyrange[i].split('~')[0])
+                    Story_high = int(storyrange[i].split('~')[1])
+                elif storyrange[i]=='all':
+                    Story_low = 1
+                    Story_high = float('inf')
+                elif '+' in storyrange[i]:
+                    Story_low = int(storyrange[i][:-1])
+                    Story_high = float('inf')
+                else:
+                    Story_low = int(storyrange[i])
+                    Story_high = int(storyrange[i])
+                if self.NumOfStories>=Story_low and self.NumOfStories<=Story_high:
+                    self.StructuralType = rownames[ind[i]]
+                    break
 
+        else:
+            self.StructuralType = StructuralType + ' is UNKNOWN'
+
+    def __Update_DesignLevel(self):
+        HazusDataTable5_4 = pd.read_csv("./Resources/HazusData Table 5.4.csv",
+            index_col='building type')
+        Cs = HazusDataTable5_4[self.__SeismicDesignLevel][self.StructuralType]
+        if pd.isna(Cs):
+            print('WARNING: Seismic design level for this building cannot be ' + 
+                self.__SeismicDesignLevel + '! It is modified as lower level.')
+            j_col = np.nonzero(~(HazusDataTable5_4.loc[self.StructuralType,:]
+                .isna().to_numpy()))[0][0]
+            self.__SeismicDesignLevel = HazusDataTable5_4.columns[j_col]
+
+        
 

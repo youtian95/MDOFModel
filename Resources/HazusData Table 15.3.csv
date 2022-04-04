@@ -1,6 +1,6 @@
 Acceleration Sensitive Non-structural Repair Cost Ratios (in % of building replacement cost),,,,,
-No.,Occupancy Class,Structural Damage State,Structural Damage State,Structural Damage State,Structural Damage State
-,-,Slight,Moderate,Extensive,Complete
+,Occupancy Class,Structural Damage State,Structural Damage State,Structural Damage State,Structural Damage State
+No.,-,Slight,Moderate,Extensive,Complete
 1,RES1,0.5,2.7,8,26.6
 2,RES2,0.8,3.8,11.3,37.8
 3,RES3A,0.8,4.3,13.1,43.7

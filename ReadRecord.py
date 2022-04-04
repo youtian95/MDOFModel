@@ -1,36 +1,82 @@
-# ReadRecord.py
-# ------------------------------------------------------------------------------------------------------------
-#
-# Written: minjie
-# Date: May 2016
+import os
 
-# A procedure which parses a ground motion record from the PEER
-# strong motion database by finding dt in the record header, then
-# echoing data values to the output file.
-#
-# Formal arguments
-#	inFilename -- file which contains PEER strong motion record
-#	outFilename -- file to be written in format G3 can read
-# Return values
-#	dt -- time step determined from file header
-#	nPts -- number of data points from file header
-#
-# Assumptions
-#	The header in the PEER record is, e.g., formatted as 1 of following:
-#  1) new PGA database
-#	 PACIFIC ENGINEERING AND ANALYSIS STRONG-MOTION DATA
-#	  IMPERIAL VALLEY 10/15/79 2319, EL CENTRO ARRAY 6, 230                           
-#	  ACCELERATION TIME HISTORY IN UNITS OF G                                         
-#	  3930 0.00500 NPTS, DT
+def ReadRecord(inFilename, outFilename):
+    # search inFilename. If its filename extension is .at2, call ReadRecord_PEER.
+    # If it's .txt (1st data col is time, 2nd col is accel), call ReadRecord_TXT.
+    # 
+    # Arguments:
+    #   inFilename: no filename extension
+    #   outFilename: '.dat' filename extension
+    if os.path.exists(inFilename + '.at2'):
+        dt, npts = ReadRecord_PEER (inFilename + '.at2', outFilename)
+    elif os.path.exists(inFilename + '.txt'):
+        dt, npts = ReadRecord_TXT (inFilename + '.txt', outFilename)
+    else:
+        print('ERROR: Cant find record file!')
+        dt = None
+        npts = None
+    return dt, npts
 
-#   2) old SMD database
-#	 PACIFIC ENGINEERING AND ANALYSIS STRONG-MOTION DATA
-#	  IMPERIAL VALLEY 10/15/79 2319, EL CENTRO ARRAY 6, 230                           
-#	  ACCELERATION TIME HISTORY IN UNITS OF G                                         
-#	  NPTS=  3930, DT= .00500 SEC
+def ReadRecord_TXT (inFilename, outFilename):
+    
+    inFileID = open(inFilename, 'r')
+    outFileID = open(outFilename, 'w')
 
+    time_1 = 0.0
+    time_2 = 0.0
+    npts=0
+    for line in inFileID:
+        if line == '\n':
+            continue
+        else:
+            words = str.replace(line,',',' ').split()
+            lengthLine = len(words)
+            if lengthLine == 2:
+                npts+=1
+                if npts==1:
+                    time_1=float(words[0])
+                elif npts==2:
+                    time_2=float(words[0])
+                outFileID.write(words[1])
+                outFileID.write('\n')
+    dt = time_2 - time_1
+    
+    inFileID.close()
+    outFileID.close()
 
-def ReadRecord (inFilename, outFilename):
+    return dt, npts
+
+def ReadRecord_PEER (inFilename, outFilename):
+    # ReadRecord.py
+    # ------------------------------------------------------------------------------------------------------------
+    #
+    # Written: minjie
+    # Date: May 2016
+
+    # A procedure which parses a ground motion record from the PEER
+    # strong motion database by finding dt in the record header, then
+    # echoing data values to the output file.
+    #
+    # Formal arguments
+    #	inFilename -- file which contains PEER strong motion record
+    #	outFilename -- file to be written in format G3 can read
+    # Return values
+    #	dt -- time step determined from file header
+    #	nPts -- number of data points from file header
+    #
+    # Assumptions
+    #	The header in the PEER record is, e.g., formatted as 1 of following:
+    #  1) new PGA database
+    #	 PACIFIC ENGINEERING AND ANALYSIS STRONG-MOTION DATA
+    #	  IMPERIAL VALLEY 10/15/79 2319, EL CENTRO ARRAY 6, 230                           
+    #	  ACCELERATION TIME HISTORY IN UNITS OF G                                         
+    #	  3930 0.00500 NPTS, DT
+
+    #   2) old SMD database
+    #	 PACIFIC ENGINEERING AND ANALYSIS STRONG-MOTION DATA
+    #	  IMPERIAL VALLEY 10/15/79 2319, EL CENTRO ARRAY 6, 230                           
+    #	  ACCELERATION TIME HISTORY IN UNITS OF G                                         
+    #	  NPTS=  3930, DT= .00500 SEC
 
     dt = 0.0
     npts = 0

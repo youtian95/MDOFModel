@@ -12,9 +12,11 @@ from openseespy.opensees import *
 import pandas as pd
 import numpy as np
 import ReadRecord
+from pathlib import Path
 
 class MDOFOpenSees():
 
+    UniqueRecorderPrefix = 'URP0_'
     __g = 9.8
 
     # structrual parameters
@@ -91,11 +93,11 @@ class MDOFOpenSees():
             load(i, i, 0.0, 0.0)
 
         # recorders
-        recorder('Element', '-file', 'DriftHistory.txt', '-time',
+        recorder('Element', '-file', self.UniqueRecorderPrefix+'DriftHistory.txt', '-time',
             '-ele', *list(range(1,self.NStories+1)), 'deformations')
-        recorder('Element', '-file', 'ForceHistory.txt', '-time',
+        recorder('Element', '-file', self.UniqueRecorderPrefix+'ForceHistory.txt', '-time',
             '-ele', *list(range(1,self.NStories+1)), 'axialForce')
-        recorder('Node', '-file', 'NodeDispHistory.txt', '-time',
+        recorder('Node', '-file', self.UniqueRecorderPrefix+'NodeDispHistory.txt', '-time',
             '-node', *list(range(1,self.NStories+1)), '-dof', 1, 'disp')
         
         # Perform analysis        
@@ -139,7 +141,8 @@ class MDOFOpenSees():
 
         return Iffinish, currentDisp
         
-    def DynamicAnalysis(self, EQRecordfile:str, GMScaling:float, ifprint: bool = True):
+    def DynamicAnalysis(self, EQRecordfile:str, GMScaling:float, ifprint: bool = True,
+        DeltaT = 'AsInRecord'):
         # Parameters:
         # -ifprint, true or false
         # -EQRecordfile, earthquake record file which is in PEER format, such as 'H-E12140'
@@ -154,47 +157,55 @@ class MDOFOpenSees():
         self.__BuildModel(ifprint)
 
         # Permform the conversion from SMD record to OpenSees record
-        dt, nPts = ReadRecord.ReadRecord(EQRecordfile +'.at2', EQRecordfile +'.dat')
+        p = Path(EQRecordfile)
+        dt, nPts = ReadRecord.ReadRecord(EQRecordfile, 
+            (Path(p.parent, self.UniqueRecorderPrefix + p.name +'.dat')).as_posix())
 
         # Uniform EXCITATION: acceleration input
         tsTag = 100
-        timeSeries('Path', tsTag, '-dt', dt, '-filePath', EQRecordfile +'.dat', '-factor', self.__g * GMScaling)
+        a = Path(p.parent,self.UniqueRecorderPrefix + p.name +'.dat').as_posix()
+        timeSeries('Path', tsTag, '-dt', dt, '-filePath', 
+            Path(p.parent,self.UniqueRecorderPrefix + p.name +'.dat').as_posix(), 
+            '-factor', self.__g * GMScaling)
         IDloadTag = 400			# load tag
         GMdirection = 1
         pattern('UniformExcitation', IDloadTag, GMdirection, '-accel', tsTag)
 
         # recorders
-        recorder('EnvelopeElement', '-file', 'MaxDrift.txt',
+        recorder('EnvelopeElement', '-file', self.UniqueRecorderPrefix+'MaxDrift.txt',
             '-ele', *list(range(1,self.NStories+1)), 'deformations')
-        recorder('Element', '-file', 'DriftHistory.txt', '-time',
+        recorder('Element', '-file', self.UniqueRecorderPrefix+'DriftHistory.txt', '-time',
             '-ele', *list(range(1,self.NStories+1)), 'deformations')
-        recorder('Element', '-file', 'ForceHistory.txt', '-time',
+        recorder('Element', '-file', self.UniqueRecorderPrefix+'ForceHistory.txt', '-time',
             '-ele', *list(range(1,self.NStories+1)), 'axialForce')
-        recorder('EnvelopeNode', '-file', 'MaxAbsAccel.txt', '-timeSeries', tsTag, 
+        recorder('EnvelopeNode', '-file', self.UniqueRecorderPrefix+'MaxAbsAccel.txt', '-timeSeries', tsTag, 
             '-node', *list(range(self.NStories+1)), '-dof', 1, 'accel')
-        recorder('EnvelopeNode', '-file', 'MaxRelativeAccel.txt', 
+        recorder('EnvelopeNode', '-file', self.UniqueRecorderPrefix+'MaxRelativeAccel.txt', 
             '-node', *list(range(self.NStories+1)), '-dof', 1, 'accel')
-        recorder('Node', '-file', 'NodeAbsAccelHistory.txt', '-timeSeries', tsTag, '-time', 
+        recorder('Node', '-file', self.UniqueRecorderPrefix+'NodeAbsAccelHistory.txt', '-timeSeries', tsTag, '-time', 
             '-node', *list(range(self.NStories+1)), '-dof', 1, 'accel')
-        recorder('Node', '-file', 'NodeRelativeAccelHistory.txt', '-time', 
+        recorder('Node', '-file', self.UniqueRecorderPrefix+'NodeRelativeAccelHistory.txt', '-time', 
             '-node', *list(range(self.NStories+1)), '-dof', 1, 'accel')
 
 
         # dynamic analysis
         Tol = 1e-8
         maxNumIter = 10
-        DtAnalysis = 0.001  # dt
+        DtAnalysis = dt if DeltaT== 'AsInRecord' else DeltaT # dt
         wipeAnalysis()
         constraints('Transformation')
         numberer('RCM')
-        system('BandGeneral')
+        system('UmfPack') # only this works when using ExpressNewton algorithm.
+        # system('BandGeneral')
 
         tCurrent = getTime()
 
         Test = {1:'NormDispIncr', 2: 'RelativeEnergyIncr', 3:'EnergyIncr', 
             4: 'RelativeNormUnbalance',5: 'RelativeNormDispIncr', 6: 'NormUnbalance'}
-        Algorithm = {1:'KrylovNewton', 2: 'SecantNewton' , 3:'ModifiedNewton' , 
-            4: 'RaphsonNewton',5: 'PeriodicNewton', 6: 'BFGS', 7: 'Broyden', 8: 'NewtonLineSearch'}
+        Algorithm = {9: 'ExpressNewton', 8: 'NewtonLineSearch', 1:'KrylovNewton', 2: 'SecantNewton' , 3:'ModifiedNewton' , 
+            4: 'RaphsonNewton',5: 'PeriodicNewton', 6: 'BFGS', 7: 'Broyden'}
+
+        # algorithm ExpressNewton 2 1.0 -currentTangent -factorOnce
 
         tFinal = nPts*dt
 
@@ -204,7 +215,9 @@ class MDOFOpenSees():
             for i in Test:
                 test(Test[i], Tol, maxNumIter)    
                 for j in Algorithm: 
-                    if j < 4:
+                    if j==9:
+                        algorithm(Algorithm[j], 2, 1.0, '-currentTangent','-factorOnce')
+                    elif j < 4:
                         algorithm(Algorithm[j], '-initial')
                     else:
                         algorithm(Algorithm[j])
@@ -217,6 +230,7 @@ class MDOFOpenSees():
                         if ok == 0:
                             tCurrent = getTime()                
                             time.append(tCurrent)
+            break
 
         Iffinish = not ok
         TotalTime = tFinal
@@ -369,29 +383,35 @@ class MDOFOpenSees():
 
     def __ReadDynamicRecorderFiles(self):
 
-        self.MaxDrift = pd.read_table('MaxDrift.txt', sep='\s+', header=None).loc[2,:]
-        self.MaxAbsAccel = pd.read_table('MaxAbsAccel.txt', sep='\s+', header=None).loc[2,:]
-        self.MaxRelativeAccel = pd.read_table('MaxRelativeAccel.txt', sep='\s+', header=None).loc[2,:]
+        a=self.UniqueRecorderPrefix+'MaxDrift.txt'
+        self.MaxDrift = pd.read_table(self.UniqueRecorderPrefix+'MaxDrift.txt', sep='\s+', header=None).loc[2,:]
+        self.MaxAbsAccel = pd.read_table(self.UniqueRecorderPrefix+'MaxAbsAccel.txt', sep='\s+', header=None).loc[2,:]
+        self.MaxRelativeAccel = pd.read_table(self.UniqueRecorderPrefix+'MaxRelativeAccel.txt', sep='\s+', header=None).loc[2,:]
         
-        df = pd.read_table('DriftHistory.txt', sep='\s+', header=None)
+        df = pd.read_table(self.UniqueRecorderPrefix+'DriftHistory.txt', sep='\s+', header=None)
         self.DriftHistory = {}
         self.DriftHistory['time'] = df.loc[:,0]
+        ind_last5sec = ((self.DriftHistory['time'][-1:]-self.DriftHistory['time'])<5.0)
+        ResDrift_dict = {}
         for i in range(self.NStories):
             self.DriftHistory[i+1] = df.loc[:,i+1]
+            ResDrift_dict[i+1] =  self.DriftHistory[i+1][ind_last5sec].mean()
 
-        df = pd.read_table('ForceHistory.txt', sep='\s+', header=None)
+        self.ResDrift = np.abs(np.array(list(ResDrift_dict.values()))).max()
+
+        df = pd.read_table(self.UniqueRecorderPrefix+'ForceHistory.txt', sep='\s+', header=None)
         self.ForceHistory = {}
         self.ForceHistory['time'] = df.loc[:,0]
         for i in range(self.NStories):
             self.ForceHistory[i+1] = df.loc[:,i+1]
         
-        df = pd.read_table('NodeAbsAccelHistory.txt', sep='\s+', header=None)
+        df = pd.read_table(self.UniqueRecorderPrefix+'NodeAbsAccelHistory.txt', sep='\s+', header=None)
         self.NodeAbsAccelHistory = {}
         self.NodeAbsAccelHistory['time'] = df.loc[:,0]
         for i in range(self.NStories):
             self.NodeAbsAccelHistory[i+1] = df.loc[:,i+1]
 
-        df = pd.read_table('NodeRelativeAccelHistory.txt', sep='\s+', header=None)
+        df = pd.read_table(self.UniqueRecorderPrefix+'NodeRelativeAccelHistory.txt', sep='\s+', header=None)
         self.NodeRelativeAccelHistory = {}
         self.NodeRelativeAccelHistory['time'] = df.loc[:,0]
         for i in range(self.NStories):
@@ -399,19 +419,19 @@ class MDOFOpenSees():
 
     def __ReadPushoverRecorderFiles(self):
 
-        df = pd.read_table('DriftHistory.txt', sep='\s+', header=None)
+        df = pd.read_table(self.UniqueRecorderPrefix+'DriftHistory.txt', sep='\s+', header=None)
         self.DriftHistory = {}
         self.DriftHistory['time'] = df.loc[:,0]
         for i in range(self.NStories):
             self.DriftHistory[i+1] = df.loc[:,i+1]
 
-        df = pd.read_table('ForceHistory.txt', sep='\s+', header=None)
+        df = pd.read_table(self.UniqueRecorderPrefix+'ForceHistory.txt', sep='\s+', header=None)
         self.ForceHistory = {}
         self.ForceHistory['time'] = df.loc[:,0]
         for i in range(self.NStories):
             self.ForceHistory[i+1] = df.loc[:,i+1]
 
-        df = pd.read_table('NodeDispHistory.txt', sep='\s+', header=None)
+        df = pd.read_table(self.UniqueRecorderPrefix+'NodeDispHistory.txt', sep='\s+', header=None)
         self.NodeDispHistory = {}
         self.NodeDispHistory['time'] = df.loc[:,0]
         for i in range(self.NStories):

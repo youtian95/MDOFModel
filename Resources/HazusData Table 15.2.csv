@@ -1,6 +1,6 @@
 Structural Repair Cost Ratios (in % of building replacement cost),,,,,
-No.,Occupancy Class,Structural Damage State,Structural Damage State,Structural Damage State,Structural Damage State
-,-,Slight,Moderate,Extensive,Complete
+,Occupancy Class,Structural Damage State,Structural Damage State,Structural Damage State,Structural Damage State
+No.,-,Slight,Moderate,Extensive,Complete
 1,RES1,0.5,2.3,11.7,23.4
 2,RES2,0.4,2.4,7.3,24.4
 3,RES3A,0.3,1.4,6.9,13.8

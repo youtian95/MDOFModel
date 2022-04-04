@@ -1,5 +1,6 @@
 ########################################################
-# Python tools for cmd 
+# Estimate seismic losses based on time history dynamic analyses. 
+# Python tools for cmd. 
 # 
 # Usage:
 # 
@@ -20,7 +21,7 @@ import MDOFOpenSees as mops
 import BldLossAssessment as bl
 
 def DynamicAnalysis_1Sim(NumofStories,FloorArea,StructuralType,OccupancyClass,
-    DesignLevel,EQRecordFile,EQScaling,OutputDir):
+    DesignLevel,EQRecordFile,EQScaling,OutputDir,SelfCenteringEnhancingFactor):
 
     bld = mlu.MDOF_LU(NumofStories, FloorArea, StructuralType)
     bld.set_DesignLevel(DesignLevel)
@@ -28,6 +29,7 @@ def DynamicAnalysis_1Sim(NumofStories,FloorArea,StructuralType,OccupancyClass,
 
     fe = mops.MDOFOpenSees(NumofStories, [bld.mass]*bld.N, [bld.K0]*bld.N, bld.DampingRatio,
         bld.HystereticCurveType, bld.Vyi, bld.betai, bld.etai, bld.DeltaCi, bld.tao)
+    fe.SelfCenteringEnhancingFactor = SelfCenteringEnhancingFactor
     fe.DynamicAnalysis(EQRecordFile, EQScaling)
     # fe.PlotForceDriftHistory(1)
 
@@ -60,11 +62,13 @@ def main(args):
     parser.add_argument('--EQRecordFile')
     parser.add_argument('--EQScaling',default = 1.0,type=float)
     parser.add_argument('--OutputDir',default = '')
+    parser.add_argument('--SelfCenteringEnhancingFactor',
+        default = 0, type=float)
     args = parser.parse_args(args)
 
     DynamicAnalysis_1Sim(args.NumofStories,args.FloorArea,args.StructuralType,
         args.OccupancyClass,args.DesignLevel,args.EQRecordFile,
-        args.EQScaling,args.OutputDir)
+        args.EQScaling,args.OutputDir,args.SelfCenteringEnhancingFactor)
 
 if __name__ == "__main__":
     main(sys.argv[1:])

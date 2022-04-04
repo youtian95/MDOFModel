@@ -1,6 +1,6 @@
 Building and Service Interruption Time Multipliers,,,,,,
-No.,Label,Structural Damage State,,,,
-,,None,Slight,Moderate,Extensive ,Complete
+,,Structural Damage State,,,,
+No.,Label,None,Slight,Moderate,Extensive ,Complete
 1,RES1,0,0,0.5,1,1
 2,RES2,0,0,0.5,1,1
 3,RES3A,0,0,0.5,1,1
