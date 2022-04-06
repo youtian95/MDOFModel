@@ -22,11 +22,18 @@ fe = mops.MDOFOpenSees(NumofStories, [bld.mass]*bld.N, [bld.K0]*bld.N, bld.Dampi
 
 if __name__ == '__main__':
     T1 = time.perf_counter()
+
     IM_list = np.linspace(0.1,2.0,10).tolist()
+    IM_list_sim = (np.linspace(0.1,2.0,10)+0.1).tolist()
     EQRecordFile_list = EQRecordFile_list
-    IDA_result = IDA.IDA(fe, IM_list, EQRecordFile_list,
-        bld.T1, DeltaT=0.1, NumPool=4)
+    IDA_obj = IDA.IDA(fe)
+    IDA_result = IDA_obj.Analyze(IM_list, EQRecordFile_list, bld.T1, DeltaT=0.1, NumPool=4)
+    IDA_result = IDA_obj.SimulateEDPGivenIM(IM_list_sim, 1000, 0.3)
+
     T2 =time.perf_counter()
+
     print('Processing time %s sec' % ((T2 - T1)))
+
     IDA_result.to_csv('IDA_results.csv')
-    IDA.plot_IDA_results(IDA_result, EQRecordFile_list)
+
+    IDA.IDA.plot_IDA_results(IDA_result, Stat=True)

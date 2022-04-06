@@ -195,15 +195,15 @@ class MDOFOpenSees():
         wipeAnalysis()
         constraints('Transformation')
         numberer('RCM')
-        system('UmfPack') # only this works when using ExpressNewton algorithm.
-        # system('BandGeneral')
+        # system('UmfPack') # only this works when using ExpressNewton algorithm.
+        system('BandGeneral')
 
         tCurrent = getTime()
 
         Test = {1:'NormDispIncr', 2: 'RelativeEnergyIncr', 3:'EnergyIncr', 
             4: 'RelativeNormUnbalance',5: 'RelativeNormDispIncr', 6: 'NormUnbalance'}
-        Algorithm = {9: 'ExpressNewton', 8: 'NewtonLineSearch', 1:'KrylovNewton', 2: 'SecantNewton' , 3:'ModifiedNewton' , 
-            4: 'RaphsonNewton',5: 'PeriodicNewton', 6: 'BFGS', 7: 'Broyden'}
+        Algorithm = {8: 'NewtonLineSearch', 1:'KrylovNewton', 2: 'SecantNewton' , 3:'ModifiedNewton' , 
+            4: 'RaphsonNewton',5: 'PeriodicNewton', 6: 'BFGS', 7: 'Broyden'} # 9: 'ExpressNewton', 
 
         # algorithm ExpressNewton 2 1.0 -currentTangent -factorOnce
 

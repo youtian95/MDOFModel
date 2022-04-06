@@ -12,12 +12,14 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "args": [
-                "--NumofStories",  "2",
-                "--FloorArea", "8118",
-                "--StructuralType", "C1",
-                "--OccupancyClass", "COM1",
-                "--EQRecordFile", "E:/CityResilienceAndResilientStructure/EQData/SW4_2019/SW4/S_20_28" ,
-                "--EQScaling", "1",
+                "--IM_list", "0.1", "0.2", "0.4", "0.6", "0.8", "1", "1.5", "2",
+                "--N_Sim", "100",
+                "--IDA_result", "E:/python小程序/MDOFModel/IDA_results.csv",
+                "--OutputDir", "E:/CityResilienceAndResilientStructure/RegionalLossSimulations",
+                "--NumofStories", "2", 
+                "--FloorArea", " 8118", 
+                "--StructuralType", "C1", 
+                "--OccupancyClass", "COM1", 
                 "--DesignLevel", "high-code"
             ]
         }

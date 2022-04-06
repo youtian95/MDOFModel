@@ -5,6 +5,7 @@
 # - openseespy, pandas, numpy, eqsig
 ########################################################
 
+from collections import Counter
 import copy
 import multiprocessing as mp
 import pandas as pd
@@ -15,14 +16,6 @@ import matplotlib.pyplot as plt
 
 import MDOFOpenSees as mops
 import ReadRecord
-
-def plot_IDA_results(IDA_result: pd.DataFrame, EQRecordFile_list: list):
-    fig, ax = plt.subplots()  
-    for EQRecordFile in EQRecordFile_list:
-        ind = (IDA_result['EQRecord']==EQRecordFile)
-        ax.plot([max(drlist) for drlist in IDA_result['MaxDrift'][ind].values], 
-            IDA_result['IM'][ind].values); 
-    plt.show()
 
 def IDA_1record(FEModel:mops.MDOFOpenSees, IM_list:list, EQRecordfile:str, period:float, 
     DeltaT = 'AsInRecord'):
@@ -57,7 +50,7 @@ def IDA_1record(FEModel:mops.MDOFOpenSees, IM_list:list, EQRecordfile:str, perio
 
     return IDA_result
 
-def IDA(FEModel:mops.MDOFOpenSees, IM_list:list, EQRecordfile_list:list, period:float,
+def IDA_f(FEModel:mops.MDOFOpenSees, IM_list:list, EQRecordfile_list:list, period:float,
     DeltaT = 'AsInRecord',NumPool = 1):
 
     IDA_result = pd.DataFrame({'IM':[],'EQRecord':[],
@@ -77,3 +70,180 @@ def IDA(FEModel:mops.MDOFOpenSees, IM_list:list, EQRecordfile_list:list, period:
                 IDA_result = pd.concat([IDA_result,IDA_1RecordResult.get()], ignore_index=True) 
 
     return IDA_result
+
+def SimulateEDPGivenIM(IDA_result:pd.DataFrame, IM_list:list, N_Sim, betaM:float = 0) -> pd.DataFrame:
+
+    if isinstance(N_Sim,int):
+        N_Sim = [N_Sim]*len(IM_list)
+
+    # max EDP
+    IDA_result = IDA_result[['IM','MaxDrift','MaxAbsAccel','ResDrift']]
+    for i in range(0,  IDA_result.shape[0]):
+        for j in range(0, IDA_result.shape[1]):
+            IDA_result.iat[i,j] = np.array(IDA_result.iloc[i,j]).max()
+
+    # origional lnMean and lnbeta of EDP
+    IM_list_original = list(Counter(IDA_result['IM'].values.tolist()).keys())
+    lnEDPs_mean_list_original = []
+    lnEDPs_cov_list_original = []
+    for IM in IM_list_original:
+        EDPs = IDA_result.drop(columns=['IM'])[IDA_result['IM']==IM].values
+        _,lnEDPs_mean,lnEDPs_cov,_,_,_ = IDA.FEMACodeSimulatingEDP(EDPs, betaM, 10)
+        lnEDPs_mean_list_original.append(lnEDPs_mean)
+        lnEDPs_cov_list_original.append(lnEDPs_cov)
+
+    # simulate EDP
+    assert len(IM_list)==len(N_Sim)
+    SimEDP = pd.DataFrame({'IM':[],'MaxDrift':[],'MaxAbsAccel':[],'ResDrift':[]})
+    for IM,N in zip(IM_list,N_Sim):
+        lnEDPs_mean = IDA.interpMatrix(IM,IM_list_original,lnEDPs_mean_list_original)
+        lnEDPs_cov = IDA.interpMatrix(IM,IM_list_original,lnEDPs_cov_list_original)
+        W,_,_,_ = IDA.FEMACodeSimulatingEDPGivenlnMeanlncov(
+            lnEDPs_mean,lnEDPs_cov,betaM,N)
+        newdf = pd.DataFrame(np.concatenate((np.array([[IM]]*N),W),axis=1), 
+            columns=list(SimEDP.columns))
+        SimEDP = pd.concat([SimEDP,newdf], ignore_index=True)
+
+    return SimEDP
+
+
+class IDA():
+
+    FEModel:mops.MDOFOpenSees = None
+    IDA_result:pd.DataFrame = None
+
+    def __init__(self, FEModel:mops.MDOFOpenSees):
+        self.FEModel = FEModel
+
+    def Analyze(self,IM_list:list, EQRecordfile_list:list, period:float,
+        DeltaT = 'AsInRecord',NumPool = 1) -> pd.DataFrame:
+        self.IDA_result = IDA_f(self.FEModel, IM_list, EQRecordfile_list, 
+            period, DeltaT, NumPool)
+        return self.IDA_result
+
+    def plot_IDA_results(IDA_result:pd.DataFrame, Stat:bool = False):
+        fig, ax = plt.subplots()  
+        if not Stat:
+            EQRecordFile_list = list(Counter(IDA_result['EQRecord'].values).keys())
+            for EQRecordFile in EQRecordFile_list:
+                ind = (IDA_result['EQRecord']==EQRecordFile)
+                ax.plot([max(drlist) for drlist in IDA_result['MaxDrift'][ind].values], 
+                    IDA_result['IM'][ind].values)
+        else:
+            IM_list = list(Counter(list(IDA_result['IM'].values)).keys())
+            EDPmax_median = []
+            EDPmax_1sigma_minus = []
+            EDPmax_1sigma_plus = []
+            for im in IM_list:
+                EDP_values = [np.array(drlist).max() for drlist in 
+                    IDA_result['MaxDrift'][IDA_result['IM']==im].values]
+                EDPmax_median.append(np.exp(np.mean(np.log(EDP_values))))
+                EDPmax_1sigma_minus.append(np.exp(np.log(EDPmax_median[-1]) - np.std(np.log(EDP_values))))
+                EDPmax_1sigma_plus.append(np.exp(np.log(EDPmax_median[-1]) + np.std(np.log(EDP_values))))
+            ax.plot(EDPmax_median,IM_list,'k')
+            ax.plot(EDPmax_1sigma_minus,IM_list,'b')
+            ax.plot(EDPmax_1sigma_plus,IM_list,'g')
+        plt.show()
+
+    def SimulateEDPGivenIM(self, IM_list:list, N_Sim, betaM:float = 0) -> pd.DataFrame:
+
+        SimEDP = SimulateEDPGivenIM(self.IDA_result,IM_list,N_Sim,betaM)
+
+        return SimEDP
+
+    def interpMatrix(x,xp:list,Yp:list)->np.array:
+        # x: scalar
+        # xp: list[float]
+        # Yp: list[np.array]
+        inx = np.argsort(np.abs(x-np.array(xp)))
+        Y = (Yp[inx[1]]-Yp[inx[0]])*(x-xp[inx[0]])/(xp[inx[1]]-xp[inx[0]]) + Yp[inx[0]]
+        return Y
+
+    def FEMACodeSimulatingEDPGivenlnMeanlncov(lnEDPs_mean,lnEDPs_cov,betaM,num_realization):
+
+        num_var = lnEDPs_cov.shape[1]
+
+        # finding the rank of covariance matrix of lnEDPs. Calling it 
+        # lnEDPs_cov_rank
+        lnEDPs_cov_rank=np.linalg.matrix_rank(lnEDPs_cov)
+        # inflating the variances with epistemic variability
+        sigma = np.sqrt(np.diag(lnEDPs_cov))[:,np.newaxis] # sqrt first to avoid under/overflow
+        sigmap2 = sigma * sigma
+        R = lnEDPs_cov / (sigma @ (sigma.transpose())) 
+        sigmap2 = sigmap2 + betaM**2    # Inflating variance for β m
+        sigma=np.sqrt(sigmap2)
+        sigma2 = sigma @ (sigma.T)
+        lnEDPs_cov_inflated=R*sigma2
+
+        # finding the eigenvalues eigenvectors of the covariance matrix. 
+        # calling them D2_total and L_total
+        D2_total,L_total = np.linalg.eig(lnEDPs_cov_inflated)
+        idx = D2_total.argsort()
+        D2_total = D2_total[idx]
+        L_total = L_total[:,idx]
+        
+        # Partition L_total to L_use. L_use is the part of eigenvector matrix
+        # L_total that corresponds to positive eigenvalues
+        if lnEDPs_cov_rank >= num_var:
+            L_use =L_total
+        else:
+            L_use = L_total[:, (num_var- lnEDPs_cov_rank):]
+            # 因为L_use为特征值从小到大排列，所以0特征值在前面
+            
+        # Partition the D2_total to D2_use. D2_use is the part of eigenvalue
+        # vector D2_total that corresponds to positive eigenvalues
+        if lnEDPs_cov_rank >= num_var:
+            D2_use = D2_total
+        else:
+            D2_use = D2_total[num_var- lnEDPs_cov_rank:]
+        
+        # Find the square root of D2_use and call is D_use. 
+        # 创建对角矩阵
+        D_use = np.diag(np.power(D2_use,0.5))
+
+        # Generate Standard random numbers
+        if lnEDPs_cov_rank >= num_var:
+            U = np.random.normal(size=(num_realization, num_var))
+        else:
+            U = np.random.normal(size=(num_realization, lnEDPs_cov_rank))
+            
+        U = U.T
+
+        # Create Lambda = D_use . L_use
+        Lambda = L_use @ D_use
+        # Create realizations matrix 
+        Z = Lambda @ U + lnEDPs_mean @ np.ones((1,num_realization))
+        lnEDPs_sim_mean = np.mean(Z,1)  # 行向量
+        lnEDPs_sim_cov = np.cov(Z)
+        ratio_mean = lnEDPs_sim_mean / (lnEDPs_mean.T)
+        ratio_cov = lnEDPs_sim_cov / lnEDPs_cov
+        W = np.exp(Z).T
+
+        return W,R,ratio_mean,ratio_cov
+
+    def FEMACodeSimulatingEDP(EDPs:np.array, betaM:float, num_realization):
+        # Returns:
+        #   W:  N_sim x N_var
+        # 
+        # Example usage:
+        # W,lnEDPs_mean,R,ratio_mean,ratio_cov = FEMACodeSimulatingEDP(
+        #     np.array([[1,2,4],[0.1,0.2,0.5],[8,9,10],[5,2,1]]),0.3,1000)
+
+        EDPs = EDPs.astype(float)
+
+        # taking natural logarithm of the EDPs. Calling it lnEDPs
+        lnEDPs = np.log(EDPs)
+        num_var = lnEDPs.shape[1]
+
+        # finding the mean matrix of lnEDPs. Calling it lnEDPs_mean
+        lnEDPs_mean = np.mean(lnEDPs,0)[:,np.newaxis]
+
+        # finding the covariance matrix of lnEDPs. Calling it lnEDPs_cov
+        lnEDPs_cov = np.cov(np.transpose(lnEDPs))
+
+        W,R,ratio_mean,ratio_cov = IDA.FEMACodeSimulatingEDPGivenlnMeanlncov(
+            lnEDPs_mean,lnEDPs_cov,betaM,num_realization)
+        
+        return W,lnEDPs_mean,lnEDPs_cov,R,ratio_mean,ratio_cov
+
+
