@@ -43,8 +43,8 @@ def IDA_1record(FEModel:mops.MDOFOpenSees, IM_list:list, EQRecordfile:str, perio
         
     for IM in IM_list:
         Iffinish, tCurrent, TotalTime = FEModel.DynamicAnalysis(EQRecordfile, IM/SA, False, DeltaT)
-        data = {'IM':IM,'EQRecord':EQRecordfile,'MaxDrift':[FEModel.MaxDrift.values],
-            'MaxAbsAccel':[FEModel.MaxAbsAccel.values],'MaxRelativeAccel':[FEModel.MaxRelativeAccel.values],
+        data = {'IM':IM,'EQRecord':EQRecordfile,'MaxDrift':[FEModel.MaxDrift],
+            'MaxAbsAccel':[FEModel.MaxAbsAccel],'MaxRelativeAccel':[FEModel.MaxRelativeAccel],
             'ResDrift':FEModel.ResDrift,'Iffinish':Iffinish}
         IDA_result=pd.concat([IDA_result,pd.DataFrame(data)], ignore_index=True)
 
@@ -73,17 +73,31 @@ def IDA_f(FEModel:mops.MDOFOpenSees, IM_list:list, EQRecordfile_list:list, perio
 
 def SimulateEDPGivenIM(IDA_result:pd.DataFrame, IM_list:list, N_Sim, betaM:float = 0) -> pd.DataFrame:
 
+    SimEDP = pd.DataFrame({'IM':[],'MaxDrift':[],'MaxAbsAccel':[],'ResDrift':[]})
+
     if isinstance(N_Sim,int):
         N_Sim = [N_Sim]*len(IM_list)
+
+    # delete those IM whose EQ number is smaller than 3
+    c = Counter(IDA_result['IM'].values.tolist())
+    for keys in list(c.keys()):
+        if c[keys] < 3:
+            del(c[keys]) 
+    IM_list_original = list(c.keys())
+    # IM_list_original = [0]+IM_list_original
+
+    if len(IM_list_original) == 0:
+        return SimEDP
 
     # max EDP
     IDA_result = IDA_result[['IM','MaxDrift','MaxAbsAccel','ResDrift']]
     for i in range(0,  IDA_result.shape[0]):
         for j in range(0, IDA_result.shape[1]):
             IDA_result.iat[i,j] = np.array(IDA_result.iloc[i,j]).max()
+    # newdf = pd.DataFrame([[0]*4], columns=list(IDA_result.columns))
+    # IDA_result = pd.concat([newdf,IDA_result], ignore_index=True)
 
     # origional lnMean and lnbeta of EDP
-    IM_list_original = list(Counter(IDA_result['IM'].values.tolist()).keys())
     lnEDPs_mean_list_original = []
     lnEDPs_cov_list_original = []
     for IM in IM_list_original:
@@ -94,12 +108,16 @@ def SimulateEDPGivenIM(IDA_result:pd.DataFrame, IM_list:list, N_Sim, betaM:float
 
     # simulate EDP
     assert len(IM_list)==len(N_Sim)
-    SimEDP = pd.DataFrame({'IM':[],'MaxDrift':[],'MaxAbsAccel':[],'ResDrift':[]})
     for IM,N in zip(IM_list,N_Sim):
         lnEDPs_mean = IDA.interpMatrix(IM,IM_list_original,lnEDPs_mean_list_original)
-        lnEDPs_cov = IDA.interpMatrix(IM,IM_list_original,lnEDPs_cov_list_original)
+        lnEDPs_cov = IDA.interpMatrix(IM,IM_list_original,lnEDPs_cov_list_original,True)
+        if N<10:
+            N_real = 10
+        else:
+            N_real = N
         W,_,_,_ = IDA.FEMACodeSimulatingEDPGivenlnMeanlncov(
-            lnEDPs_mean,lnEDPs_cov,betaM,N)
+            lnEDPs_mean,lnEDPs_cov,betaM,N_real)
+        W = W[0:N,:]
         newdf = pd.DataFrame(np.concatenate((np.array([[IM]]*N),W),axis=1), 
             columns=list(SimEDP.columns))
         SimEDP = pd.concat([SimEDP,newdf], ignore_index=True)
@@ -151,12 +169,24 @@ class IDA():
 
         return SimEDP
 
-    def interpMatrix(x,xp:list,Yp:list)->np.array:
+    def interpMatrix(x,xp:list,Yp:list, nonnegative:bool = False)->np.array:
         # x: scalar
         # xp: list[float]
         # Yp: list[np.array]
+
+        if len(xp)==1:
+            xp = [0]+xp
+            Yp = [0]+Yp
+
         inx = np.argsort(np.abs(x-np.array(xp)))
+
         Y = (Yp[inx[1]]-Yp[inx[0]])*(x-xp[inx[0]])/(xp[inx[1]]-xp[inx[0]]) + Yp[inx[0]]
+
+        if nonnegative and (np.sum(Y<=0)>0):
+            Y = Yp[inx[0]]
+            if np.sum(Y<=0)>0:
+                Y = Yp[inx[1]]
+                
         return Y
 
     def FEMACodeSimulatingEDPGivenlnMeanlncov(lnEDPs_mean,lnEDPs_cov,betaM,num_realization):

@@ -13,6 +13,7 @@ import pandas as pd
 import numpy as np
 import ReadRecord
 from pathlib import Path
+import os
 
 class MDOFOpenSees():
 
@@ -34,10 +35,10 @@ class MDOFOpenSees():
     NodeDispHistory = {} # NodeDispHistory['time'], NodeDispHistory[1-N]
 
     # Dynamic analysis results
-    MaxDrift = [] # MaxDrift[0] is the 1st story
-    MaxAbsAccel = [] # MaxAbsAccel[0] is the ground
-    MaxRelativeAccel = [] # [0] is the ground
-    ResDrift = 0.0
+    MaxDrift = np.array([]) # MaxDrift[0] is the 1st story
+    MaxAbsAccel = np.array([]) # MaxAbsAccel[0] is the ground
+    MaxRelativeAccel = np.array([]) # [0] is the ground
+    ResDrift = None
     DriftHistory = {} # DriftHistory['time'] is the time list. DriftHistory[1] is the IDR list of 1st story
     ForceHistory = {} 
     NodeAbsAccelHistory = {} # NodeAbsAccelHistory[0] is the ground
@@ -142,11 +143,12 @@ class MDOFOpenSees():
         return Iffinish, currentDisp
         
     def DynamicAnalysis(self, EQRecordfile:str, GMScaling:float, ifprint: bool = True,
-        DeltaT = 'AsInRecord'):
+        DeltaT = 0.1):
         # Parameters:
         # -ifprint, true or false
         # -EQRecordfile, earthquake record file which is in PEER format, such as 'H-E12140'
         # -GMScaling, ground motion scaling factor
+        # -DeltaT, 'AsInRecord' or a float
         # 
         # Return:
         # Iffinish, tCurrent, TotalTime
@@ -383,10 +385,14 @@ class MDOFOpenSees():
 
     def __ReadDynamicRecorderFiles(self):
 
-        a=self.UniqueRecorderPrefix+'MaxDrift.txt'
-        self.MaxDrift = pd.read_table(self.UniqueRecorderPrefix+'MaxDrift.txt', sep='\s+', header=None).loc[2,:]
-        self.MaxAbsAccel = pd.read_table(self.UniqueRecorderPrefix+'MaxAbsAccel.txt', sep='\s+', header=None).loc[2,:]
-        self.MaxRelativeAccel = pd.read_table(self.UniqueRecorderPrefix+'MaxRelativeAccel.txt', sep='\s+', header=None).loc[2,:]
+        # check if analysis results are empty
+        fpath = self.UniqueRecorderPrefix+'MaxDrift.txt'
+        if not (os.path.isfile(fpath) and os.path.getsize(fpath) > 0):
+            return
+
+        self.MaxDrift = pd.read_table(self.UniqueRecorderPrefix+'MaxDrift.txt', sep='\s+', header=None).loc[2,:].values
+        self.MaxAbsAccel = pd.read_table(self.UniqueRecorderPrefix+'MaxAbsAccel.txt', sep='\s+', header=None).loc[2,:].values
+        self.MaxRelativeAccel = pd.read_table(self.UniqueRecorderPrefix+'MaxRelativeAccel.txt', sep='\s+', header=None).loc[2,:].values
         
         df = pd.read_table(self.UniqueRecorderPrefix+'DriftHistory.txt', sep='\s+', header=None)
         self.DriftHistory = {}

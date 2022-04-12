@@ -52,9 +52,26 @@ def main(args):
         default = 0, type=float)
     args = parser.parse_args(args)
 
+    if args.IM_list is None:
+        print("ERROR: wrong arguments!")
+        return
+
     main_IDA(args.IM_list,args.NumofStories,args.FloorArea,args.StructuralType,
         args.OccupancyClass,args.DesignLevel,args.EQMetaDataFile,
         args.OutputCSVFile,args.SelfCenteringEnhancingFactor)
+
+# test function
+# IM_list = [0.1,0.2,0.4,0.6,0.8,1.0,1.5,2.0]
+# NumofStories = 2
+# FloorArea = 5093.5
+# StructuralType = 'C1'
+# OccupancyClass = 'COM1'
+# DesignLevel = 'high-code'
+# EQMetaDataFile = 'E:\CityResilienceAndResilientStructure\EQData\FEMA_P-695_far-field_ground_motions\MetaData_part10.txt'
+# OutputCSVFile = 'E:\CityResilienceAndResilientStructure\IDA_results\IDA_results_SC05\IDA_result_ReprBldID_305.csv'
+# SelfCenteringEnhancingFactor = 0.5
+# main_IDA(IM_list,NumofStories,FloorArea,StructuralType,OccupancyClass,
+#     DesignLevel,EQMetaDataFile,OutputCSVFile,SelfCenteringEnhancingFactor)
 
 if __name__ == "__main__":
     main(sys.argv[1:])

@@ -27,18 +27,18 @@ class BldLossAssessment:
 
     ## Estimated results
     # damage states
-    DS_Struct = ['None'] # None/ Slight/ Moderate/ Extensive/ Complete
-    DS_NonStruct_DriftSen = ['None']
-    DS_NonStruct_AccelSen = ['None']
+    DS_Struct = ['UNKNOWN'] # None/ Slight/ Moderate/ Extensive/ Complete
+    DS_NonStruct_DriftSen = ['UNKNOWN']
+    DS_NonStruct_AccelSen = ['UNKNOWN']
     # repair cost
-    RepairCost_Total = [0]
-    RepairCost_Struct = [0]
-    RepairCost_NonStruct_DriftSen = [0]
-    RepairCost_NonStruct_AccelSen = [0]
+    RepairCost_Total = ['UNKNOWN']
+    RepairCost_Struct = ['UNKNOWN']
+    RepairCost_NonStruct_DriftSen = ['UNKNOWN']
+    RepairCost_NonStruct_AccelSen = ['UNKNOWN']
     # repair time
-    RepairTime = [0] 
-    RecoveryTime = [0] # longer than repair time. It considers other factors apart from repairing components
-    FunctionLossTime = [0]
+    RepairTime = ['UNKNOWN'] 
+    RecoveryTime = ['UNKNOWN'] # longer than repair time. It considers other factors apart from repairing components
+    FunctionLossTime = ['UNKNOWN']
 
     ## Data from hazus
     # IDR/Accel thresholds for structural/Nonstructural DS
@@ -83,8 +83,11 @@ class BldLossAssessment:
 
     def LossAssessment(self,MaxDriftRatio,MaxAbsAccel):
         # Parameters:
-        # MaxDriftRatio - max IDR. It is a vector if there are multiple analyses.
-        # MaxAbsAccel - max AbsAccel (g)
+        # MaxDriftRatio - max IDR. List[] . It is a vector if there are multiple analyses.
+        # MaxAbsAccel - max AbsAccel (g). list[]. 
+
+        if len(MaxDriftRatio)==0 or len(MaxAbsAccel)==0:
+            return
 
         self.__Estimate_DamageState(MaxDriftRatio,MaxAbsAccel)
         self.__Estimate_RepairCost()
@@ -131,8 +134,8 @@ class BldLossAssessment:
         if self.OccupancyClass=='RES1':
             HazusInventoryTable6_3 = pd.read_csv("./Resources/HazusInventory Table 6-3.csv",
                 index_col=[0,1], header=1)
-            assert self.NumOfStories<=3
-            HeightClass = ['One-story','Two-story','Three-story'][self.NumOfStories-1]
+            N_story = self.NumOfStories if self.NumOfStories<=3 else 3
+            HeightClass = ['One-story','Two-story','Three-story'][N_story-1]
             RCPersqft = HazusInventoryTable6_3.loc[('Average',HeightClass),'Average Base cost per sq.ft'] 
         else:
             RCPersqft = HazusInventoryTable6_2.loc[self.OccupancyClass,'Structure Replacement Costl/sq.ft (2018)']
