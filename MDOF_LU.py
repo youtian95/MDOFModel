@@ -175,6 +175,9 @@ class MDOF_LU:
         }
         pd.DataFrame(data).to_csv(filename +'.csv',index=0,sep=',',mode='a')
 
+    def getDesignLevel(self):
+        return self.__SeismicDesignLevel
+
     def __Read_StructuralType(self,StructuralType):
         HazusInventoryTable4_2 = pd.read_csv("./Resources/HazusInventory Table 4-2.csv",
             index_col=0, header=0)

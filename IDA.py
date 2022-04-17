@@ -140,7 +140,8 @@ class IDA():
         return self.IDA_result
 
     def plot_IDA_results(IDA_result:pd.DataFrame, Stat:bool = False):
-        fig, ax = plt.subplots()  
+        cm = 1/2.54  # centimeters in inches
+        fig, ax = plt.subplots()   # figsize=(8*cm, 6*cm)
         if not Stat:
             EQRecordFile_list = list(Counter(IDA_result['EQRecord'].values).keys())
             for EQRecordFile in EQRecordFile_list:
@@ -158,9 +159,33 @@ class IDA():
                 EDPmax_median.append(np.exp(np.mean(np.log(EDP_values))))
                 EDPmax_1sigma_minus.append(np.exp(np.log(EDPmax_median[-1]) - np.std(np.log(EDP_values))))
                 EDPmax_1sigma_plus.append(np.exp(np.log(EDPmax_median[-1]) + np.std(np.log(EDP_values))))
-            ax.plot(EDPmax_median,IM_list,'k')
-            ax.plot(EDPmax_1sigma_minus,IM_list,'b')
-            ax.plot(EDPmax_1sigma_plus,IM_list,'g')
+            ax.plot(EDPmax_median,IM_list,'k',label='Median')
+            ax.plot(EDPmax_1sigma_minus,IM_list,'b',label='-sigma')
+            ax.plot(EDPmax_1sigma_plus,IM_list,'g',label='+sigma')
+
+        
+
+        plt.xlim(0,0.5)
+        plt.ylim(0,2)
+
+        plt.xticks(fontproperties = 'Times New Roman', fontsize=12)
+        plt.yticks(np.arange(0, 2, 0.2), fontproperties = 'Times New Roman', fontsize=12)
+        # 指定横纵坐标的字体以及字体大小，记住是fontsize不是size。yticks上我还用numpy指定了坐标轴的变化范围。
+
+        plt.legend(loc='lower right', prop={'family':'Times New Roman', 'size':12})
+        # 图上的legend，记住字体是要用prop以字典形式设置的，而且字的大小是size不是fontsize，这个容易和xticks的命令弄混
+
+        # plt.title('1000 samples', fontdict={'family' : 'Times New Roman', 'size':12})
+        # 指定图上标题的字体及大小
+
+        plt.xlabel('Drift ratio', fontdict={'family' : 'Times New Roman', 'size':12})
+        plt.ylabel('Spectral accelerations (g)', fontdict={'family' : 'Times New Roman', 'size':12})
+        # 指定横纵坐标描述的字体及大小
+
+        plt.savefig('IDA.eps', dpi=600, format='eps', bbox_inches="tight")
+        # 保存文件，dpi指定保存文件的分辨率
+        # bbox_inches="tight" 可以保存图上所有的信息，不会出现横纵坐标轴的描述存掉了的情况
+
         plt.show()
 
     def SimulateEDPGivenIM(self, IM_list:list, N_Sim, betaM:float = 0) -> pd.DataFrame:

@@ -78,7 +78,8 @@ def Simulate_losses_given_IM_basedon_IDA(IDA_result,IM_list,N_Sim,betaM,OutputDi
     SimEDP.to_csv(Path(OutputDir)/'SimEDP.csv')
 
     blo = bl.BldLossAssessment(NumofStories, FloorArea,StructuralType,DesignLevel,OccupancyClass)
-    blo.LossAssessment(SimEDP['MaxDrift'].tolist(),(SimEDP['MaxAbsAccel']/9.8).tolist())  
+    blo.LossAssessment(SimEDP['MaxDrift'].tolist(),(SimEDP['MaxAbsAccel']/9.8).tolist(),
+        SimEDP['ResDrift'].tolist())  
     data = {
         'DS_Struct': blo.DS_Struct, 
         'DS_NonStruct_DriftSen':blo.DS_NonStruct_DriftSen,

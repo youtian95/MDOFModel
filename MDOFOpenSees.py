@@ -14,6 +14,7 @@ import numpy as np
 import ReadRecord
 from pathlib import Path
 import os
+import mpl_toolkits.axisartist as axisartist
 
 class MDOFOpenSees():
 
@@ -247,9 +248,35 @@ class MDOFOpenSees():
         return Iffinish, tCurrent, TotalTime
 
     def PlotForceDriftHistory(self, NumOfStory:int = 1):
-        fig, ax = plt.subplots()  
-        ax.plot(self.DriftHistory[NumOfStory],self.ForceHistory[NumOfStory]); 
+        cm = 1/2.54  # centimeters in inches
+        fig = plt.figure('Origional',(10*cm,8*cm))
+    
+        ax = axisartist.Subplot(fig, 1,1,1)
+        fig.add_axes(ax)
+        
+        ax.axis[:].set_visible(False)
+        
+        ax.axis["x"] = ax.new_floating_axis(0, 0)
+        ax.axis["y"] = ax.new_floating_axis(1, 0)
+        ax.axis["x"].set_axis_direction('top')
+        ax.axis["y"].set_axis_direction('left')
+        ax.axis["x"].set_axisline_style("->", size = 2.0)
+        ax.axis["y"].set_axisline_style("->", size = 2.0)
+        
+        ax.plot(self.DriftHistory[NumOfStory],self.ForceHistory[NumOfStory],linewidth = 2)
+        # plt.title('y = 2sin(2t)',fontsize = 14, pad = 20)
+        
+        # ax.set_xticks(np.linspace(0.25,1.25,5)*np.pi)
+        ax.axes.xaxis.set_ticklabels([])
+        ax.axes.yaxis.set_ticklabels([])
+        # ax.set_xticklabels(['$\\frac{\pi}{4}$','$\\frac{\pi}{2}$', '$\\frac{3\pi}{4}$', '$\pi$', '$\\frac{5\pi}{4}$', '$\\frac{3\pi}{2}$'])
+        # ax.set_yticks([0, 1, 2])
+        
+        # ax.set_xlim(-0.5*np.pi,1.5*np.pi)
+        # ax.set_ylim(-2.2, 2.2)
+        
         plt.show()
+
 
     def __BuildModel(self, ifprint: bool):
         # define building model

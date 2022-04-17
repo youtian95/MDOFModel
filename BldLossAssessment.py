@@ -40,6 +40,10 @@ class BldLossAssessment:
     RecoveryTime = ['UNKNOWN'] # longer than repair time. It considers other factors apart from repairing components
     FunctionLossTime = ['UNKNOWN']
 
+    ## parameters on resisual drift
+    Median_RIDR = 0.01 # irrepairable residual drift ratio. 0 means not to consider it
+    Beta_RIDR = 0.3
+
     ## Data from hazus
     # IDR/Accel thresholds for structural/Nonstructural DS
     Median_IDR_Struct_DS = [0,0,0,0]
@@ -49,13 +53,14 @@ class BldLossAssessment:
     Median_Accel_NonStruct_DS = [0,0,0,0]  # Unit: g
     Beta_Accel_NonStruct_DS = [0,0,0,0] # Unit: g
     # replacement cost
-    ReplacementCost_Total = 0
-    StructureReplacementCost = 0
-    ContentsValueFactorOfStructureValue = 1.0
+    ReplacementCost_Total = 0 
+    StructureReplacementCost = 0  # including (1) structural, (2) drift-sens, and (3) accel-sens non-struct
+    ContentsValueFactorOfStructureValue = 1.0   # accel-sensitive non-structural components
     # repair cost ratios
     StructureRCRatio_DS = [0,0,0,0] # corresponding to 4 damage states
     AccelSenNonstructRCRatio_DS = [0,0,0,0] # corresponding to 4 damage states
     DriftSenNonstructRCRatio_DS = [0,0,0,0] # corresponding to 4 damage states
+    ContentsRCRatio_DS = [0,0,0,0] # corresponding to 4 accel-sensitive damage states
     # repair time
     RepairTime_DS = [0,0,0,0,0]  # corresponding to 5 damage states
     RecoveryTime_DS = [0,0,0,0,0]  # corresponding to 5 damage states
@@ -81,18 +86,18 @@ class BldLossAssessment:
         self.__Read_RepairTime_DS()
         self.__Read_IDR_Accel_thresholds_DS()
 
-    def LossAssessment(self,MaxDriftRatio,MaxAbsAccel):
+    def LossAssessment(self,MaxDriftRatio,MaxAbsAccel, MaxRIDR = 'none'):
         # Parameters:
         # MaxDriftRatio - max IDR. List[] . It is a vector if there are multiple analyses.
         # MaxAbsAccel - max AbsAccel (g). list[]. 
+        # MaxRIDR - max residual drift ratio. list[].
 
         if len(MaxDriftRatio)==0 or len(MaxAbsAccel)==0:
             return
 
-        self.__Estimate_DamageState(MaxDriftRatio,MaxAbsAccel)
+        self.__Estimate_DamageState(MaxDriftRatio,MaxAbsAccel,MaxRIDR)
         self.__Estimate_RepairCost()
         self.__Estimate_RepairTime()
-
 
     def __Read_StructuralType(self,StructuralType):
         HazusInventoryTable4_2 = pd.read_csv("./Resources/HazusInventory Table 4-2.csv",
@@ -161,9 +166,13 @@ class BldLossAssessment:
         HazusTable15_4 = pd.read_csv("./Resources/HazusData Table 15.4.csv",
             index_col=1, header=2)
         HazusTable15_4 = HazusTable15_4.drop(['No.'], axis=1)
-        self.StructureRCRatio_DS = HazusTable15_2.loc[self.OccupancyClass].values.tolist()
-        self.AccelSenNonstructRCRatio_DS = HazusTable15_3.loc[self.OccupancyClass].values.tolist()
-        self.DriftSenNonstructRCRatio_DS = HazusTable15_4.loc[self.OccupancyClass].values.tolist()
+        HazusTable15_5 = pd.read_csv("./Resources/HazusData Table 15.5.csv",
+            index_col=1, header=2)
+        HazusTable15_5 = HazusTable15_5.drop(['No.'], axis=1)
+        self.StructureRCRatio_DS = (HazusTable15_2.loc[self.OccupancyClass].values/100.0).tolist()
+        self.AccelSenNonstructRCRatio_DS = (HazusTable15_3.loc[self.OccupancyClass].values/100.0).tolist()
+        self.DriftSenNonstructRCRatio_DS = (HazusTable15_4.loc[self.OccupancyClass].values/100.0).tolist()
+        self.ContentsRCRatio_DS = (HazusTable15_5.loc[self.OccupancyClass].values/100.0).tolist()
 
     def __Read_RepairTime_DS(self):
         HazusData4_2_Table11_7 = pd.read_csv("./Resources/HazusData4-2 Table 11-7.csv",
@@ -195,8 +204,9 @@ class BldLossAssessment:
         self.Median_Accel_NonStruct_DS = HazusTable5_12.loc[self.SeismicDesignLevel,('Median')].values.tolist()
         self.Beta_Accel_NonStruct_DS = HazusTable5_12.loc[self.SeismicDesignLevel,('Beta')].values.tolist()
         
-    def __Estimate_DamageState(self,MaxDriftRatio,MaxAbsAccel):
+    def __Estimate_DamageState(self,MaxDriftRatio,MaxAbsAccel,MaxRIDR):
 
+        # normal distribution objects
         nd_DS_Struct = []
         for a, b in zip(self.Median_IDR_Struct_DS,self.Beta_IDR_Struct_DS):
             nd_DS_Struct.append(sta.NormalDist(log(a),b))
@@ -207,6 +217,8 @@ class BldLossAssessment:
         for a, b in zip(self.Median_Accel_NonStruct_DS,self.Beta_Accel_NonStruct_DS):
             nd_DS_NonStruct_Accel.append(sta.NormalDist(log(a),b))
         
+        if not ((self.Median_RIDR ==0) or (MaxRIDR=='none')):
+            nd_irrepairable = sta.NormalDist(log(self.Median_RIDR),self.Beta_RIDR)
 
         self.DS_Struct = ['None'] * len(MaxDriftRatio)
         self.DS_NonStruct_DriftSen = ['None']* len(MaxDriftRatio)
@@ -215,6 +227,22 @@ class BldLossAssessment:
         for d, a in zip(MaxDriftRatio, MaxAbsAccel):
             # damage states
 
+            # irrepairable
+            if not ((self.Median_RIDR ==0) or (MaxRIDR=='none')):
+                assert isinstance(MaxRIDR,list)
+                assert len(MaxRIDR)==len(MaxDriftRatio)
+
+                P_irrepairable = nd_irrepairable.cdf(log(MaxRIDR[i]))
+                if random.random()<=P_irrepairable:
+                    # irrepairable
+                    self.DS_Struct[i] = self.__DS_type[-1]
+                    self.DS_NonStruct_DriftSen[i] = self.__DS_type[-1]
+                    self.DS_NonStruct_AccelSen[i] = self.__DS_type[-1]
+
+                    i+=1
+                    continue
+
+            # repairable
             P_DS_Struct = [nd.cdf(log(d)) for nd in nd_DS_Struct]
             P_DS_NonStruct_Drift = [nd.cdf(log(d)) for nd in nd_DS_NonStruct_Drift]
             P_DS_NonStruct_Accel = [nd.cdf(log(a)) for nd in nd_DS_NonStruct_Accel]
@@ -244,21 +272,22 @@ class BldLossAssessment:
 
             if ds1 in self.__DS_type:
                 ind = self.__DS_type.index(ds1) 
-                self.RepairCost_Struct[i] = self.StructureRCRatio_DS[ind]*self.ReplacementCost_Total
+                self.RepairCost_Struct[i] = self.StructureRCRatio_DS[ind]*self.StructureReplacementCost
             else:
                 self.RepairCost_Struct[i] = 0
 
             if ds2 in self.__DS_type:
                 ind = self.__DS_type.index(ds2) 
                 self.RepairCost_NonStruct_DriftSen[i] = \
-                    self.DriftSenNonstructRCRatio_DS[ind]*self.ReplacementCost_Total
+                    self.DriftSenNonstructRCRatio_DS[ind]*self.StructureReplacementCost
             else:
                 self.RepairCost_NonStruct_DriftSen[i] = 0
 
             if ds3 in self.__DS_type:
                 ind = self.__DS_type.index(ds3) 
                 self.RepairCost_NonStruct_AccelSen[i] = \
-                    self.AccelSenNonstructRCRatio_DS[ind]*self.ReplacementCost_Total
+                    self.AccelSenNonstructRCRatio_DS[ind]*self.StructureReplacementCost \
+                    + self.ContentsRCRatio_DS[ind]*self.StructureReplacementCost
             else:
                 self.RepairCost_NonStruct_AccelSen[i] = 0
 
