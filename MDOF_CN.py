@@ -1,7 +1,5 @@
 ########################################################
-# Generate structural parameters according to basic building information.
-# 
-# Note: all buildings are considered as moderate seismic design level
+# Generate structural parameters according to basic building information based on CN standards.
 # 
 # Dependancy: 
 # - numpy, pandas
@@ -10,12 +8,13 @@
 import numpy as np
 import pandas as pd
 
-class MDOF_LU:
+class MDOF_CN:
 
     # private
     __FloorUnitMass = 1200  # 1200 kg/m2
-    __SeismicDesignLevel = 'moderate-code' # 'high-code', 'moderate-code', 'low-code',
-    __EQDuration = 'Moderate'  # 'Short' 'Moderate' 'Long'
+    __SeismicDesignLevel = '7' # 6, 7, 7.5, 8, 8.5, 9 (g)
+    __EQGroup = '2' # 1, 2, 3
+    # __EQDuration = 'Moderate'  # 'Short' 'Moderate' 'Long'
     
     # input parameters
     NumOfStories = 0
@@ -27,12 +26,11 @@ class MDOF_LU:
     mass = 0    # kg
     K0 = 0      # N/m
     T1 = 0      # s
-    # T2 = 0      # s
     N = 0
     DampingRatio = 0.05 # damping ratio
     TypicalStoryHeight = 0 # (m)
     # backbone curve
-    Vdi = []    # design strength, N
+    Vdi = []    # design strength (N)  (475-year return period)
     Vyi = []    # N
     betai = [] # overstrength ratio. Utlmate strength divided by yield strength
     etai = [] # hardening ratio
@@ -48,30 +46,26 @@ class MDOF_LU:
         self.FloorArea = FloorArea
         self.__Read_StructuralType(StructuralType)
 
-        self.__Update_DesignLevel()
+        # story mass
+        self.mass = self.__FloorUnitMass * self.FloorArea
 
         # read hazus data
         HazusDataTable5_5 = pd.read_csv("./Resources/HazusData Table 5.5.csv",
             index_col='building type')
         HazusDataTable5_1 = pd.read_csv("./Resources/HazusData Table 5.1.csv",
             index_col='building type')
-        HazusDataTable5_4 = pd.read_csv("./Resources/HazusData Table 5.4.csv",
-            index_col='building type')
-        HazusDataTable5_6 = pd.read_csv("./Resources/HazusData Table 5.6.csv",
-            index_col='building type')
-        HazusDataTable5_9 = pd.read_csv("./Resources/HazusData Table 5.9.csv",
-            index_col=0, header=[0,1,2,3])
-        HazusDataTable5_18 = pd.read_csv("./Resources/HazusData Table 5.18.csv",
-            index_col=0, header=[0,1])
 
-        # story mass
-        self.mass = self.__FloorUnitMass * self.FloorArea
-
-        # periods
+        # periods. According to Hazus Table 5.5
         T0 = HazusDataTable5_5['typical periods, Te (seconds)'][self.StructuralType]
         N0 = HazusDataTable5_1['typical stories'][self.StructuralType]
         self.T1 = self.N / N0 * T0
-        # self.T2 = self.T1/3.0
+        # According to CN code, if the building has more than 10 stories, the period is calculated as follows:
+        # [1] 中国建筑科学研究院, 同济大学, 中国建筑设计研究院, 等. 建筑结构荷载规范（GB 50009-2012） [S]. 2012.
+        if self.N >= 10:
+            if self.StructuralType[0] == 'C': # concrete
+                self.T1 = 0.075*self.N
+            elif self.StructuralType[0] == 'S': # steel
+                self.T1 = 0.125*self.N
 
         # elastic stiffness
         UnitMassMat = np.zeros([self.N,self.N])
@@ -178,6 +172,8 @@ class MDOF_LU:
     def getDesignLevel(self):
         return self.__SeismicDesignLevel
 
+    # Generate detailed structural types (like S2) according to reference [1], if only a general type (like S) is provided.
+    # [1] FEMA. Hazus Inventory Technical Manual [R]. Hazus 4.2 SP3. FEMA, 2021.
     def __Read_StructuralType(self,StructuralType):
         HazusInventoryTable4_2 = pd.read_csv("./Resources/HazusInventory Table 4-2.csv",
             index_col=0, header=0)
@@ -212,16 +208,6 @@ class MDOF_LU:
         else:
             self.StructuralType = StructuralType + ' is UNKNOWN'
 
-    def __Update_DesignLevel(self):
-        HazusDataTable5_4 = pd.read_csv("./Resources/HazusData Table 5.4.csv",
-            index_col='building type')
-        Cs = HazusDataTable5_4[self.__SeismicDesignLevel][self.StructuralType]
-        if pd.isna(Cs):
-            print('WARNING: Seismic design level for this building cannot be ' + 
-                self.__SeismicDesignLevel + '! It is modified as lower level.')
-            j_col = np.nonzero(~(HazusDataTable5_4.loc[self.StructuralType,:]
-                .isna().to_numpy()))[0][0]
-            self.__SeismicDesignLevel = HazusDataTable5_4.columns[j_col]
 
         
 
