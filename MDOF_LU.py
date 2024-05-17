@@ -224,4 +224,3 @@ class MDOF_LU:
             self.__SeismicDesignLevel = HazusDataTable5_4.columns[j_col]
 
         
-

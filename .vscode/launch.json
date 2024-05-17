@@ -6,22 +6,22 @@
     "configurations": [
         {
             "name": "Python: 当前文件",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
             "justMyCode": false,
-            "args": [
-                "--IM_list", "0.1", "0.2", "0.4", "0.6", "0.8", "1", "1.5", "2",
-                "--N_Sim", "100",
-                "--IDA_result", "E:/python小程序/MDOFModel/IDA_results.csv",
-                "--OutputDir", "E:/CityResilienceAndResilientStructure/RegionalLossSimulations",
-                "--NumofStories", "2", 
-                "--FloorArea", " 8118", 
-                "--StructuralType", "C1", 
-                "--OccupancyClass", "COM1", 
-                "--DesignLevel", "high-code"
-            ]
+            // "args": [
+            //     "--IM_list", "0.1", "0.2", "0.4", "0.6", "0.8", "1", "1.5", "2",
+            //     "--N_Sim", "100",
+            //     "--IDA_result", "E:/python小程序/MDOFModel/IDA_results.csv",
+            //     "--OutputDir", "E:/CityResilienceAndResilientStructure/RegionalLossSimulations",
+            //     "--NumofStories", "2", 
+            //     "--FloorArea", " 8118", 
+            //     "--StructuralType", "C1", 
+            //     "--OccupancyClass", "COM1", 
+            //     "--DesignLevel", "high-code"
+            // ]
         }
     ]
 }

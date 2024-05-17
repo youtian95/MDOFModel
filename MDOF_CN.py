@@ -7,19 +7,24 @@
 
 import numpy as np
 import pandas as pd
+import re
+
+import Alpha_CNcode as ACN
 
 class MDOF_CN:
 
     # private
     __FloorUnitMass = 1200  # 1200 kg/m2
-    __SeismicDesignLevel = '7' # 6, 7, 7.5, 8, 8.5, 9 (g)
-    __EQGroup = '2' # 1, 2, 3
-    # __EQDuration = 'Moderate'  # 'Short' 'Moderate' 'Long'
     
     # input parameters
     NumOfStories = 0
     FloorArea = 0   # m2
     StructuralType = 'UNKNOWN' # Hazus table 5.1
+    SeismicDesignLevel = '7' # 6, 7, 7.5, 8, 8.5, 9 (g)
+    EQGroup = '2' # 1, 2, 3
+    SiteClass = '3'  # 1_0, 1_1, 2, 3, 4
+    longitude = None
+    latitude = None
 
     # output parameters
     # basic
@@ -40,12 +45,22 @@ class MDOF_CN:
     # ['Modified-Clough','Kinematic hardening','Pinching']
     HystereticCurveType = 'Modified-Clough' 
 
-    def __init__(self, NumOfStories, FloorArea, StructuralType):
+    def __init__(self, NumOfStories, FloorArea, StructuralType, City='UNKNOWN', SiteClass='UNKNOWN',
+            longitude = None, latitude = None):
         self.N = NumOfStories
         self.NumOfStories = NumOfStories
         self.FloorArea = FloorArea
         self.__Read_StructuralType(StructuralType)
-
+        if not (City == 'UNKNOWN'):
+            self.__Set_DesignLevelbyCity(City)
+        self.longitude = longitude
+        self.latitude = latitude
+        if not (SiteClass == 'UNKNOWN'):
+            self.SiteClass = SiteClass
+        else:
+            if (longitude and latitude):
+                self.__Set_SiteClassbyLoc(longitude,latitude)
+            
         # story mass
         self.mass = self.__FloorUnitMass * self.FloorArea
 
@@ -54,6 +69,15 @@ class MDOF_CN:
             index_col='building type')
         HazusDataTable5_1 = pd.read_csv("./Resources/HazusData Table 5.1.csv",
             index_col='building type')
+        HazusDataTable5_6 = pd.read_csv("./Resources/HazusData Table 5.6.csv",
+            index_col='building type')
+        HazusDataTable5_9 = pd.read_csv("./Resources/HazusData Table 5.9.csv",
+            index_col=0, header=[0,1,2,3])
+        HazusDataTable5_18 = pd.read_csv("./Resources/HazusData Table 5.18.csv",
+            index_col=0, header=[0,1])
+        
+        # Concert_CN2Hazus_SeismicDesignLevel
+        SDL_Hazus = Concert_CN2Hazus_SeismicDesignLevel(self.SeismicDesignLevel)
 
         # periods. According to Hazus Table 5.5
         T0 = HazusDataTable5_5['typical periods, Te (seconds)'][self.StructuralType]
@@ -97,23 +121,33 @@ class MDOF_CN:
         else:
             pass
 
+        # Tg
+        Tg = ACN.Tg_CNcode(self.EQGroup,self.SiteClass)
+        # alphaMax_medium
+        alphaMax_medium = ACN.alphaMax_CNcode('medium',self.SeismicDesignLevel)
+        alpha1_medium = ACN.Alpha_CNcode(self.T1,Tg,alphaMax_medium,self.DampingRatio)
+        alphaMax_major = ACN.alphaMax_CNcode('major',self.SeismicDesignLevel)
+        alpha1_major = ACN.Alpha_CNcode(self.T1,Tg,alphaMax_major,self.DampingRatio)
+
         # Vyi, betai, etai
-        Cs = HazusDataTable5_4[self.__SeismicDesignLevel][self.StructuralType]
-        gamma = HazusDataTable5_5['overstrength ratio, yield, gamma'][self.StructuralType]
-        lambda_ = HazusDataTable5_5['overstrength ratio, ultimate, lambda'][self.StructuralType]
-        alpha1 = HazusDataTable5_5['modal factor, weight, alpha1'][self.StructuralType]
-        miu = HazusDataTable5_6[self.__SeismicDesignLevel][self.StructuralType]
-        SAy = Cs*gamma/alpha1
-        SAu = lambda_ * SAy
+        # Per GB 50011-2010
+        kesi_y = 0.4 # Table 5.5.4, GB 50011-2010
+        SAy = 0.85*alpha1_major*kesi_y
         SDy = self.mass * SAy / self.K0
+        gamma = (alpha1_major*kesi_y)/alpha1_medium  # 'overstrength ratio, yield, gamma'
+        lambda_ = HazusDataTable5_5['overstrength ratio, ultimate, lambda'][self.StructuralType]
+        SAu = lambda_ * SAy
+        miu = HazusDataTable5_6[SDL_Hazus][self.StructuralType]
         SDu = SDy * lambda_ * miu
         ISDR_threshold = HazusDataTable5_9.loc[self.StructuralType,
-            (self.__SeismicDesignLevel,'Interstory Drift at Threshold of Damage State','Median','Complete')]
-        kappa = HazusDataTable5_18.loc[self.StructuralType,
-            (self.__SeismicDesignLevel,self.__EQDuration)]
+            (SDL_Hazus,'Interstory Drift at Threshold of Damage State','Median','Complete')]
+        kappa = HazusDataTable5_18.loc[self.StructuralType,(SDL_Hazus,'Moderate')]
+        # typical story height
         Height_feet = HazusDataTable5_1['typical height to roof (feet)'][self.StructuralType]
         StoryHeight = Height_feet/N0*0.3048
         self.TypicalStoryHeight = StoryHeight
+
+        # Vyi, Vdi, betai, etai of other stories
         self.Vyi = [0] * self.N
         self.Vdi = [0] * self.N
         self.betai = [0] * self.N
@@ -121,7 +155,7 @@ class MDOF_CN:
         self.DeltaCi = [0] * self.N
         for i in range(self.N):
             Gammai = 1.0 - i*(i+1.0)/(self.N+1.0)/self.N
-            self.Vyi[i] = SAy*alpha1*self.mass*9.8*self.N*Gammai
+            self.Vyi[i] = SAy*self.mass*9.8*self.N*Gammai
             self.Vdi[i] = self.Vyi[i]/gamma
             self.betai[i] = SAu / SAy
             self.etai[i] = (SAu - SAy) / (SDu - SDy) * SDy / SAy
@@ -137,7 +171,7 @@ class MDOF_CN:
             self.tao = kappa
 
     def set_DesignLevel(self, DesignLevel: str):
-        self.__SeismicDesignLevel = DesignLevel
+        self.SeismicDesignLevel = DesignLevel
         self.__init__(self.NumOfStories,self.FloorArea,self.StructuralType)
 
     def OutputStructuralParameters(self, filename):
@@ -168,9 +202,6 @@ class MDOF_CN:
             'Complete damage displacement (m)': self.DeltaCi,
         }
         pd.DataFrame(data).to_csv(filename +'.csv',index=0,sep=',',mode='a')
-
-    def getDesignLevel(self):
-        return self.__SeismicDesignLevel
 
     # Generate detailed structural types (like S2) according to reference [1], if only a general type (like S) is provided.
     # [1] FEMA. Hazus Inventory Technical Manual [R]. Hazus 4.2 SP3. FEMA, 2021.
@@ -208,6 +239,54 @@ class MDOF_CN:
         else:
             self.StructuralType = StructuralType + ' is UNKNOWN'
 
+    # Set seismic design level according to city
+    # [1] GB 50011-2010(2016) Appendix A
+    def __Set_DesignLevelbyCity(self, city: str):
+        GBApp_A = pd.read_csv("./Resources/GB50011-2010(2016)-Appendix-A.csv",
+            na_values='-')
+        Row = GBApp_A[GBApp_A['City'].str.contains(city,na=False)]
+        if Row.empty:
+            print("Error: cannot find such city")
+            raise SystemExit
+        else:
+            SDL = Row['Design Level'].values[-1]   
+            SDL = re.findall(r"\d+\.?\d*", SDL)[0]
+            alphaMax = Row['Alpha_max'].values[-1]
+            alphaMax = re.findall(r"\d+\.?\d*", alphaMax)[0]
+            alphaMax = float(alphaMax)
+            if SDL == '8' and alphaMax == 0.3:
+                SDL = '8.5'
+            elif SDL == '7' and alphaMax == 0.15:
+                SDL = '7.5'
+            self.SeismicDesignLevel = SDL
+            EQGroup = Row['EQgroup'].values[-1]
+            if EQGroup[1] == '一':
+                EQGroup = '1'
+            elif EQGroup[1] == '二':
+                EQGroup = '2'
+            elif EQGroup[1] == '三':
+                EQGroup = '3'
+            self.EQGroup = EQGroup
 
+    def __Set_SiteClassbyLoc(self, Longitude: float, Latitude: float):
+        VS30Table = pd.read_excel("./Resources/China_Mainland_SCK_Vs30.xlsx",header=1)
+        distances = np.sqrt((VS30Table['Longitude (°)'] - Longitude)**2 \
+            + (VS30Table['Latitude (°)'] - Latitude)**2)
+        closest_index = distances.idxmin()
+
+        self.SiteClass = SiteClass
+
+# convert Chinese seismic design level to Hazus seismic design level
+def Concert_CN2Hazus_SeismicDesignLevel(SDL_CN: str):
+    alphaMax = ACN.alphaMax_CNcode('medium',SDL_CN)
+    if alphaMax > (0.4+0.2)/2:
+        # UBC Zone 4 (0.4 g)
+        SDL_Hazus = 'high-code'
+    elif (alphaMax > (0.2+0.075)/2) and (alphaMax<= (0.4+0.2)/2):
+        # UBC Zone 2B (0.2 g)
+        SDL_Hazus = 'moderate-code'
+    elif alphaMax<= (0.2+0.075)/2:
+        SDL_Hazus = 'low-code'
+    return SDL_Hazus
         
 
