@@ -1,2 +1,2 @@
 DS_Struct,DS_NonStruct_DriftSen,DS_NonStruct_AccelSen,RepairCost_Total,RepairCost_Struct,RepairCost_NonStruct_DriftSen,RepairCost_NonStruct_AccelSen,RepairTime,RecoveryTime,FunctionLossTime
-Slight,Moderate,Moderate,58561859.64078719,3570845.1000479995,35708451.000479996,19282563.540259197,2,5,0.0
+Moderate,Extensive,None,1299787.6164174718,109505.91640147199,1190281.7000159998,0,30,120,60.0

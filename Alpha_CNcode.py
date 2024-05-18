@@ -59,3 +59,16 @@ def alphaMax_CNcode(EQlevel,SeismicDesignLevel):
     else:
         alphaMax = None
     return alphaMax
+
+# convert Chinese seismic design level to Hazus seismic design level
+def Concert_CN2Hazus_SeismicDesignLevel(SDL_CN: str):
+    alphaMax = alphaMax_CNcode('medium',SDL_CN)
+    if alphaMax > (0.4+0.2)/2:
+        # UBC Zone 4 (0.4 g)
+        SDL_Hazus = 'high-code'
+    elif (alphaMax > (0.2+0.075)/2) and (alphaMax<= (0.4+0.2)/2):
+        # UBC Zone 2B (0.2 g)
+        SDL_Hazus = 'moderate-code'
+    elif alphaMax<= (0.2+0.075)/2:
+        SDL_Hazus = 'low-code'
+    return SDL_Hazus

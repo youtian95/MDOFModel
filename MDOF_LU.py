@@ -7,6 +7,7 @@
 # - numpy, pandas
 ########################################################
 
+from enum import Enum
 import numpy as np
 import pandas as pd
 
@@ -42,12 +43,13 @@ class MDOF_LU:
     # ['Modified-Clough','Kinematic hardening','Pinching']
     HystereticCurveType = 'Modified-Clough' 
 
-    def __init__(self, NumOfStories, FloorArea, StructuralType):
+    def __init__(self, NumOfStories, FloorArea, StructuralType, SeismicDesignLevel = 'UNKNOWN'):
         self.N = NumOfStories
         self.NumOfStories = NumOfStories
         self.FloorArea = FloorArea
         self.__Read_StructuralType(StructuralType)
-
+        if SeismicDesignLevel != 'UNKNOWN':
+            self.__SeismicDesignLevel = SeismicDesignLevel
         self.__Update_DesignLevel()
 
         # read hazus data

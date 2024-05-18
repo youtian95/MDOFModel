@@ -45,14 +45,24 @@ class MDOF_CN:
     # ['Modified-Clough','Kinematic hardening','Pinching']
     HystereticCurveType = 'Modified-Clough' 
 
-    def __init__(self, NumOfStories, FloorArea, StructuralType, City='UNKNOWN', SiteClass='UNKNOWN',
-            longitude = None, latitude = None):
+    # If the seismic design level or EQgroup is not provided, they will be set according to the city.
+    # If the site class is not provided, it will be set according to the location.
+    def __init__(self, NumOfStories, FloorArea, StructuralType, 
+            SeismicDesignLevel = 'UNKNOWN', EQGroup = 'UNKNOWN', City='UNKNOWN', 
+            SiteClass='UNKNOWN', longitude = None, latitude = None):
         self.N = NumOfStories
         self.NumOfStories = NumOfStories
         self.FloorArea = FloorArea
         self.__Read_StructuralType(StructuralType)
-        if not (City == 'UNKNOWN'):
+        # design level
+        if not (SeismicDesignLevel == 'UNKNOWN'):
+            self.SeismicDesignLevel = SeismicDesignLevel
+        if not (EQGroup == 'UNKNOWN'):
+            self.EQGroup = EQGroup
+        if (not (City == 'UNKNOWN')) and \
+            ((SeismicDesignLevel == 'UNKNOWN') or (EQGroup == 'UNKNOWN')):
             self.__Set_DesignLevelbyCity(City)
+        # site class
         self.longitude = longitude
         self.latitude = latitude
         if not (SiteClass == 'UNKNOWN'):
@@ -77,7 +87,7 @@ class MDOF_CN:
             index_col=0, header=[0,1])
         
         # Concert_CN2Hazus_SeismicDesignLevel
-        SDL_Hazus = Concert_CN2Hazus_SeismicDesignLevel(self.SeismicDesignLevel)
+        SDL_Hazus = ACN.Concert_CN2Hazus_SeismicDesignLevel(self.SeismicDesignLevel)
 
         # periods. According to Hazus Table 5.5
         T0 = HazusDataTable5_5['typical periods, Te (seconds)'][self.StructuralType]
@@ -268,25 +278,27 @@ class MDOF_CN:
                 EQGroup = '3'
             self.EQGroup = EQGroup
 
+    # Set site class according to location per GB 50011-2010(2016) Table 4.1.6
+    # [1] GB 50011-2010(2016) Table 4.1.6
+    # [2] Zhou J, Li X, Tian X, Xu G. New Framework of Combining Observations with Topographic Slope to Estimate VS30 and Its Application on Building a VS30 Map for Mainland China. Bulletin of the Seismological Society of America, 2022, 112(4): 2049-2069.
     def __Set_SiteClassbyLoc(self, Longitude: float, Latitude: float):
         VS30Table = pd.read_excel("./Resources/China_Mainland_SCK_Vs30.xlsx",header=1)
         distances = np.sqrt((VS30Table['Longitude (°)'] - Longitude)**2 \
             + (VS30Table['Latitude (°)'] - Latitude)**2)
         closest_index = distances.idxmin()
-
+        VS30 = VS30Table.iloc[closest_index-1, 4]
+        if VS30 > 800:
+            SiteClass = '1_0'
+        elif VS30 > 500:
+            SiteClass = '1_1'
+        elif VS30 > 250:
+            SiteClass = '2'
+        elif VS30 > 150:
+            SiteClass = '3'
+        else:
+            SiteClass = '4'
         self.SiteClass = SiteClass
 
-# convert Chinese seismic design level to Hazus seismic design level
-def Concert_CN2Hazus_SeismicDesignLevel(SDL_CN: str):
-    alphaMax = ACN.alphaMax_CNcode('medium',SDL_CN)
-    if alphaMax > (0.4+0.2)/2:
-        # UBC Zone 4 (0.4 g)
-        SDL_Hazus = 'high-code'
-    elif (alphaMax > (0.2+0.075)/2) and (alphaMax<= (0.4+0.2)/2):
-        # UBC Zone 2B (0.2 g)
-        SDL_Hazus = 'moderate-code'
-    elif alphaMax<= (0.2+0.075)/2:
-        SDL_Hazus = 'low-code'
-    return SDL_Hazus
+
         
 

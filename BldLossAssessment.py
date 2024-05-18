@@ -41,7 +41,7 @@ class BldLossAssessment:
     FunctionLossTime = ['UNKNOWN']
 
     ## parameters on resisual drift
-    Median_RIDR = 0.01 # irrepairable residual drift ratio. 0 means not to consider it
+    Median_RIDR = 0.01  # irrepairable residual drift ratio. 0 means not to consider it
     Beta_RIDR = 0.3
 
     ## Data from hazus
