@@ -1,9 +1,14 @@
+import sys
+from pathlib import Path
+import os
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
 import numpy as np
 import matplotlib.pyplot as plt
 import eqsig.single
 
 bf, sub_fig = plt.subplots()
-with open('H-E12140.dat', "r") as f:
+with open(os.path.join(os.path.dirname(__file__),'H-E12140.dat'), "r") as f:
     Allstr = f.read()
 Allstr = Allstr.split()
 a = np.array(Allstr).astype(float)

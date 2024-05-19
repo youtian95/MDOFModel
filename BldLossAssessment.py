@@ -7,6 +7,7 @@
 # - pandas, numpy
 ########################################################
 
+from pathlib import Path
 from operator import index
 import numpy as np
 import random
@@ -100,7 +101,8 @@ class BldLossAssessment:
         self.__Estimate_RepairTime()
 
     def __Read_StructuralType(self,StructuralType):
-        HazusInventoryTable4_2 = pd.read_csv("./Resources/HazusInventory Table 4-2.csv",
+        current_dir = Path(__file__).resolve().parent
+        HazusInventoryTable4_2 = pd.read_csv(current_dir/"Resources/HazusInventory Table 4-2.csv",
             index_col=0, header=0)
         rownames = HazusInventoryTable4_2.index.to_list()
         rownames_NO_LMH = rownames.copy()
@@ -134,10 +136,13 @@ class BldLossAssessment:
             self.StructuralType = StructuralType + ' is UNKNOWN'
 
     def __Read_StructureReplacementCost(self):
-        HazusInventoryTable6_2 = pd.read_csv("./Resources/HazusInventory Table 6-2.csv",
+        current_dir = Path(__file__).resolve().parent
+        HazusInventoryTable6_2 = pd.read_csv(
+            current_dir/"./Resources/HazusInventory Table 6-2.csv",
             index_col=0, header=1)
         if self.OccupancyClass=='RES1':
-            HazusInventoryTable6_3 = pd.read_csv("./Resources/HazusInventory Table 6-3.csv",
+            HazusInventoryTable6_3 = pd.read_csv(
+                current_dir/"./Resources/HazusInventory Table 6-3.csv",
                 index_col=[0,1], header=1)
             N_story = self.NumOfStories if self.NumOfStories<=3 else 3
             HeightClass = ['One-story','Two-story','Three-story'][N_story-1]
@@ -150,23 +155,25 @@ class BldLossAssessment:
         self.StructureReplacementCost = RCPersqft*(self.FloorArea*3.28*3.28)
 
     def __Read_ContentsValueFactor(self):
-        HazusInventoryTable6_9 = pd.read_csv("./Resources/HazusInventory Table 6-9.csv",
+        current_dir = Path(__file__).resolve().parent
+        HazusInventoryTable6_9 = pd.read_csv(current_dir/"./Resources/HazusInventory Table 6-9.csv",
             index_col=0, header=1)
         ContentsValueFactor = HazusInventoryTable6_9.loc[self.OccupancyClass,'Contents Value (%)']
         assert ContentsValueFactor[-1:]=='%'
         self.ContentsValueFactorOfStructureValue = float(ContentsValueFactor[:-1])/100.0
 
     def __Read_RepairCostRatios(self):
-        HazusTable15_2 = pd.read_csv("./Resources/HazusData Table 15.2.csv",
+        current_dir = Path(__file__).resolve().parent
+        HazusTable15_2 = pd.read_csv(current_dir/"./Resources/HazusData Table 15.2.csv",
             index_col=1, header=2)
         HazusTable15_2 = HazusTable15_2.drop(['No.'], axis=1)
-        HazusTable15_3 = pd.read_csv("./Resources/HazusData Table 15.3.csv",
+        HazusTable15_3 = pd.read_csv(current_dir/"./Resources/HazusData Table 15.3.csv",
             index_col=1, header=2)
         HazusTable15_3 = HazusTable15_3.drop(['No.'], axis=1)
-        HazusTable15_4 = pd.read_csv("./Resources/HazusData Table 15.4.csv",
+        HazusTable15_4 = pd.read_csv(current_dir/"./Resources/HazusData Table 15.4.csv",
             index_col=1, header=2)
         HazusTable15_4 = HazusTable15_4.drop(['No.'], axis=1)
-        HazusTable15_5 = pd.read_csv("./Resources/HazusData Table 15.5.csv",
+        HazusTable15_5 = pd.read_csv(current_dir/"./Resources/HazusData Table 15.5.csv",
             index_col=1, header=2)
         HazusTable15_5 = HazusTable15_5.drop(['No.'], axis=1)
         self.StructureRCRatio_DS = (HazusTable15_2.loc[self.OccupancyClass].values/100.0).tolist()
@@ -175,13 +182,14 @@ class BldLossAssessment:
         self.ContentsRCRatio_DS = (HazusTable15_5.loc[self.OccupancyClass].values/100.0).tolist()
 
     def __Read_RepairTime_DS(self):
-        HazusData4_2_Table11_7 = pd.read_csv("./Resources/HazusData4-2 Table 11-7.csv",
+        current_dir = Path(__file__).resolve().parent
+        HazusData4_2_Table11_7 = pd.read_csv(current_dir/"./Resources/HazusData4-2 Table 11-7.csv",
             index_col=1, header=2)
         HazusData4_2_Table11_7 = HazusData4_2_Table11_7.drop(['No.'], axis=1)
-        HazusData4_2_Table11_8 = pd.read_csv("./Resources/HazusData4-2 Table 11-8.csv",
+        HazusData4_2_Table11_8 = pd.read_csv(current_dir/"./Resources/HazusData4-2 Table 11-8.csv",
             index_col=1, header=2)
         HazusData4_2_Table11_8 = HazusData4_2_Table11_8.drop(['No.'], axis=1)
-        HazusData4_2_Table11_9 = pd.read_csv("./Resources/HazusData4-2 Table 11-9.csv",
+        HazusData4_2_Table11_9 = pd.read_csv(current_dir/"./Resources/HazusData4-2 Table 11-9.csv",
             index_col=1, header=2)
         HazusData4_2_Table11_9 = HazusData4_2_Table11_9.drop(['No.'], axis=1)
         self.RepairTime_DS = HazusData4_2_Table11_7.loc[self.OccupancyClass].values.tolist()
@@ -189,11 +197,12 @@ class BldLossAssessment:
         self.FunctionLossMultipliers = HazusData4_2_Table11_9.loc[self.OccupancyClass].values.tolist()
         
     def __Read_IDR_Accel_thresholds_DS(self):
-        HazusTable5_9 = pd.read_csv("./Resources/HazusData Table 5.9.csv",
+        current_dir = Path(__file__).resolve().parent
+        HazusTable5_9 = pd.read_csv(current_dir/"./Resources/HazusData Table 5.9.csv",
             index_col=0, header=[0,1,2,3])
-        HazusTable5_10 = pd.read_csv("./Resources/HazusData Table 5.10.csv",
+        HazusTable5_10 = pd.read_csv(current_dir/"./Resources/HazusData Table 5.10.csv",
             index_col=None, header=[1,2])
-        HazusTable5_12 = pd.read_csv("./Resources/HazusData Table 5.12.csv",
+        HazusTable5_12 = pd.read_csv(current_dir/"./Resources/HazusData Table 5.12.csv",
             index_col=0, header=[1,2])
         self.Median_IDR_Struct_DS = HazusTable5_9.loc[self.StructuralType,(self.SeismicDesignLevel,
             'Interstory Drift at Threshold of Damage State','Median')].values.tolist()

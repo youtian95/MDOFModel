@@ -7,7 +7,7 @@
 # - numpy, pandas
 ########################################################
 
-from enum import Enum
+from pathlib import Path
 import numpy as np
 import pandas as pd
 
@@ -53,17 +53,18 @@ class MDOF_LU:
         self.__Update_DesignLevel()
 
         # read hazus data
-        HazusDataTable5_5 = pd.read_csv("./Resources/HazusData Table 5.5.csv",
+        current_directory = Path(__file__).resolve().parent
+        HazusDataTable5_5 = pd.read_csv(current_directory/"Resources/HazusData Table 5.5.csv",
             index_col='building type')
-        HazusDataTable5_1 = pd.read_csv("./Resources/HazusData Table 5.1.csv",
+        HazusDataTable5_1 = pd.read_csv(current_directory/"Resources/HazusData Table 5.1.csv",
             index_col='building type')
-        HazusDataTable5_4 = pd.read_csv("./Resources/HazusData Table 5.4.csv",
+        HazusDataTable5_4 = pd.read_csv(current_directory/"Resources/HazusData Table 5.4.csv",
             index_col='building type')
-        HazusDataTable5_6 = pd.read_csv("./Resources/HazusData Table 5.6.csv",
+        HazusDataTable5_6 = pd.read_csv(current_directory/"Resources/HazusData Table 5.6.csv",
             index_col='building type')
-        HazusDataTable5_9 = pd.read_csv("./Resources/HazusData Table 5.9.csv",
+        HazusDataTable5_9 = pd.read_csv(current_directory/"Resources/HazusData Table 5.9.csv",
             index_col=0, header=[0,1,2,3])
-        HazusDataTable5_18 = pd.read_csv("./Resources/HazusData Table 5.18.csv",
+        HazusDataTable5_18 = pd.read_csv(current_directory/"Resources/HazusData Table 5.18.csv",
             index_col=0, header=[0,1])
 
         # story mass
@@ -181,7 +182,8 @@ class MDOF_LU:
         return self.__SeismicDesignLevel
 
     def __Read_StructuralType(self,StructuralType):
-        HazusInventoryTable4_2 = pd.read_csv("./Resources/HazusInventory Table 4-2.csv",
+        current_directory = Path(__file__).resolve().parent
+        HazusInventoryTable4_2 = pd.read_csv(current_directory/"Resources/HazusInventory Table 4-2.csv",
             index_col=0, header=0)
         rownames = HazusInventoryTable4_2.index.to_list()
         rownames_NO_LMH = rownames.copy()
@@ -215,7 +217,8 @@ class MDOF_LU:
             self.StructuralType = StructuralType + ' is UNKNOWN'
 
     def __Update_DesignLevel(self):
-        HazusDataTable5_4 = pd.read_csv("./Resources/HazusData Table 5.4.csv",
+        current_directory = Path(__file__).resolve().parent
+        HazusDataTable5_4 = pd.read_csv(current_directory / "Resources/HazusData Table 5.4.csv",
             index_col='building type')
         Cs = HazusDataTable5_4[self.__SeismicDesignLevel][self.StructuralType]
         if pd.isna(Cs):

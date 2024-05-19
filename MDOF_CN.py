@@ -5,6 +5,7 @@
 # - numpy, pandas
 ########################################################
 
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import re
@@ -75,15 +76,16 @@ class MDOF_CN:
         self.mass = self.__FloorUnitMass * self.FloorArea
 
         # read hazus data
-        HazusDataTable5_5 = pd.read_csv("./Resources/HazusData Table 5.5.csv",
+        current_path = Path(__file__).resolve().parent
+        HazusDataTable5_5 = pd.read_csv(current_path/"./Resources/HazusData Table 5.5.csv",
             index_col='building type')
-        HazusDataTable5_1 = pd.read_csv("./Resources/HazusData Table 5.1.csv",
+        HazusDataTable5_1 = pd.read_csv(current_path/"./Resources/HazusData Table 5.1.csv",
             index_col='building type')
-        HazusDataTable5_6 = pd.read_csv("./Resources/HazusData Table 5.6.csv",
+        HazusDataTable5_6 = pd.read_csv(current_path/"./Resources/HazusData Table 5.6.csv",
             index_col='building type')
-        HazusDataTable5_9 = pd.read_csv("./Resources/HazusData Table 5.9.csv",
+        HazusDataTable5_9 = pd.read_csv(current_path/"./Resources/HazusData Table 5.9.csv",
             index_col=0, header=[0,1,2,3])
-        HazusDataTable5_18 = pd.read_csv("./Resources/HazusData Table 5.18.csv",
+        HazusDataTable5_18 = pd.read_csv(current_path/"./Resources/HazusData Table 5.18.csv",
             index_col=0, header=[0,1])
         
         # Concert_CN2Hazus_SeismicDesignLevel
@@ -216,7 +218,8 @@ class MDOF_CN:
     # Generate detailed structural types (like S2) according to reference [1], if only a general type (like S) is provided.
     # [1] FEMA. Hazus Inventory Technical Manual [R]. Hazus 4.2 SP3. FEMA, 2021.
     def __Read_StructuralType(self,StructuralType):
-        HazusInventoryTable4_2 = pd.read_csv("./Resources/HazusInventory Table 4-2.csv",
+        current_path = Path(__file__).resolve().parent
+        HazusInventoryTable4_2 = pd.read_csv(current_path/"./Resources/HazusInventory Table 4-2.csv",
             index_col=0, header=0)
         rownames = HazusInventoryTable4_2.index.to_list()
         rownames_NO_LMH = rownames.copy()
@@ -252,7 +255,8 @@ class MDOF_CN:
     # Set seismic design level according to city
     # [1] GB 50011-2010(2016) Appendix A
     def __Set_DesignLevelbyCity(self, city: str):
-        GBApp_A = pd.read_csv("./Resources/GB50011-2010(2016)-Appendix-A.csv",
+        current_path = Path(__file__).resolve().parent
+        GBApp_A = pd.read_csv(current_path/"./Resources/GB50011-2010(2016)-Appendix-A.csv",
             na_values='-')
         Row = GBApp_A[GBApp_A['City'].str.contains(city,na=False)]
         if Row.empty:
@@ -282,7 +286,8 @@ class MDOF_CN:
     # [1] GB 50011-2010(2016) Table 4.1.6
     # [2] Zhou J, Li X, Tian X, Xu G. New Framework of Combining Observations with Topographic Slope to Estimate VS30 and Its Application on Building a VS30 Map for Mainland China. Bulletin of the Seismological Society of America, 2022, 112(4): 2049-2069.
     def __Set_SiteClassbyLoc(self, Longitude: float, Latitude: float):
-        VS30Table = pd.read_excel("./Resources/China_Mainland_SCK_Vs30.xlsx",header=1)
+        current_path = Path(__file__).resolve().parent
+        VS30Table = pd.read_excel(current_path/"./Resources/China_Mainland_SCK_Vs30.xlsx",header=1)
         distances = np.sqrt((VS30Table['Longitude (°)'] - Longitude)**2 \
             + (VS30Table['Latitude (°)'] - Latitude)**2)
         closest_index = distances.idxmin()

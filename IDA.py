@@ -42,7 +42,8 @@ def IDA_1record(FEModel:mops.MDOFOpenSees, IM_list:list, EQRecordfile:str, perio
     SA = record.s_a[0]/9.8
         
     for IM in IM_list:
-        Iffinish, tCurrent, TotalTime = FEModel.DynamicAnalysis(EQRecordfile, IM/SA, False, DeltaT)
+        Iffinish, tCurrent, TotalTime = FEModel.DynamicAnalysis(
+            str(Path(EQRecordfile)), IM/SA, False, DeltaT)
         data = {'IM':IM,'EQRecord':EQRecordfile,'MaxDrift':[FEModel.MaxDrift],
             'MaxAbsAccel':[FEModel.MaxAbsAccel],'MaxRelativeAccel':[FEModel.MaxRelativeAccel],
             'ResDrift':FEModel.ResDrift,'Iffinish':Iffinish}
@@ -139,7 +140,7 @@ class IDA():
             period, DeltaT, NumPool)
         return self.IDA_result
 
-    def plot_IDA_results(IDA_result:pd.DataFrame, Stat:bool = False):
+    def plot_IDA_results(IDA_result:pd.DataFrame, Stat:bool = False, FigName:str = 'IDA.jpg'):
         cm = 1/2.54  # centimeters in inches
         fig, ax = plt.subplots()   # figsize=(8*cm, 6*cm)
         if not Stat:
@@ -182,7 +183,7 @@ class IDA():
         plt.ylabel('Spectral accelerations (g)', fontdict={'family' : 'Times New Roman', 'size':12})
         # 指定横纵坐标描述的字体及大小
 
-        plt.savefig('IDA.eps', dpi=600, format='eps', bbox_inches="tight")
+        plt.savefig(FigName, dpi=600, format='jpg', bbox_inches="tight")
         # 保存文件，dpi指定保存文件的分辨率
         # bbox_inches="tight" 可以保存图上所有的信息，不会出现横纵坐标轴的描述存掉了的情况
 
