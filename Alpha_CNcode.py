@@ -51,7 +51,7 @@ def Tg_CNcode(EQgroup,SiteClass):
 def alphaMax_CNcode(EQlevel,SeismicDesignLevel):
     matrix = {
         'minor':  {'6': 0.04, '7': 0.08, '7.5': 0.12, '8': 0.16, '8.': 0.24, '9': 0.32},
-        'medium': {'6': 0.05, '7': 0.10, '7.5': 0.15, '8': 0.20, '8.': 0.30, '9': 0.40},
+        'medium': {'6': 0.12, '7': 0.24, '7.5': 0.36, '8': 0.48, '8.': 0.72, '9': 0.96},
         'major':  {'6': 0.28, '7': 0.50, '7.5': 0.72, '8': 0.90, '8.': 1.20, '9': 1.40}
     }
     if EQlevel in matrix and SeismicDesignLevel in matrix[EQlevel]:

@@ -265,9 +265,10 @@ class MDOF_CN:
         else:
             SDL = Row['Design Level'].values[-1]   
             SDL = re.findall(r"\d+\.?\d*", SDL)[0]
-            alphaMax = Row['Alpha_max'].values[-1]
-            alphaMax = re.findall(r"\d+\.?\d*", alphaMax)[0]
-            alphaMax = float(alphaMax)
+            PGA = Row['PGA'].values[-1]
+            PGA = re.findall(r"\d+\.?\d*", PGA)[0]
+            PGA = float(PGA)
+            alphaMax = PGA*2.4
             if SDL == '8' and alphaMax == 0.3:
                 SDL = '8.5'
             elif SDL == '7' and alphaMax == 0.15:
