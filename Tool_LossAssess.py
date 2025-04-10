@@ -18,17 +18,16 @@
 
 import argparse
 import sys
-import os
 from pathlib import Path
 
 import pandas as pd
 import numpy as np
 
-import MDOF_LU as mlu
-import MDOFOpenSees as mops
-import BldLossAssessment as bl
-import IDA
-import Alpha_CNcode as ACN
+from . import MDOF_LU as mlu
+from . import MDOFOpenSees as mops
+from . import BldLossAssessment as bl
+from . import IDA
+from . import Alpha_CNcode as ACN
 
 def DynamicAnalysis_1Sim(NumofStories,FloorArea,StructuralType,OccupancyClass,
     DesignInfo,EQRecordFile,EQScaling,OutputDir,SelfCenteringEnhancingFactor):
@@ -74,9 +73,10 @@ def DynamicAnalysis_1Sim(NumofStories,FloorArea,StructuralType,OccupancyClass,
     df.to_csv(Path(OutputDir).joinpath('BldLoss.csv'),index=0)
 
 def Simulate_losses_given_IM_basedon_IDA(IDA_result,IM_list,N_Sim,betaM,OutputDir,
-    NumofStories,FloorArea,StructuralType,DesignInfo,OccupancyClass):
+    NumofStories,FloorArea,StructuralType,DesignInfo,OccupancyClass) -> tuple[pd.DataFrame,pd.DataFrame]:
 
     IDA_result = pd.read_csv(Path(IDA_result))
+    IDA_result['Iffinish'] = IDA_result['Iffinish'].astype(bool)
     IDA_result = IDA_result.loc[:, ~IDA_result.columns.str.contains('^Unnamed')]
     IDA_result = IDA_result.loc[IDA_result['Iffinish']==1,:]  
     for ind,row in IDA_result.iterrows():
@@ -88,7 +88,8 @@ def Simulate_losses_given_IM_basedon_IDA(IDA_result,IM_list,N_Sim,betaM,OutputDi
     if len(N_Sim)==1:
         N_Sim = N_Sim[0]
     SimEDP = IDA.SimulateEDPGivenIM(IDA_result,IM_list,N_Sim,betaM)
-    SimEDP.to_csv(Path(OutputDir)/'SimEDP.csv')
+    if OutputDir is not None:
+        SimEDP.to_csv(Path(OutputDir)/'SimEDP.csv')
 
     DesignLevel = DesignInfo['SeismicDesignLevel']
     if DesignInfo['Code'] == 'CN':
@@ -97,6 +98,7 @@ def Simulate_losses_given_IM_basedon_IDA(IDA_result,IM_list,N_Sim,betaM,OutputDi
     blo.LossAssessment(SimEDP['MaxDrift'].tolist(),(SimEDP['MaxAbsAccel']/9.8).tolist(),
         SimEDP['ResDrift'].tolist())  
     data = {
+        'IM': SimEDP['IM'].tolist(),
         'DS_Struct': blo.DS_Struct, 
         'DS_NonStruct_DriftSen':blo.DS_NonStruct_DriftSen,
         'DS_NonStruct_AccelSen': blo.DS_NonStruct_AccelSen,
@@ -109,7 +111,10 @@ def Simulate_losses_given_IM_basedon_IDA(IDA_result,IM_list,N_Sim,betaM,OutputDi
         'FunctionLossTime': blo.FunctionLossTime
     }
     df = pd.DataFrame(data)
-    df.to_csv(Path(OutputDir)/'BldLoss.csv')
+    if OutputDir is not None:
+        df.to_csv(Path(OutputDir)/'BldLoss.csv')
+
+    return SimEDP, df
 
 
 def main(args):

@@ -13,9 +13,11 @@ import numpy as np
 import eqsig.single
 from pathlib import Path
 import matplotlib.pyplot as plt
+import numpy as np
+import math
 
-import MDOFOpenSees as mops
-import ReadRecord
+from . import MDOFOpenSees as mops
+from . import ReadRecord
 
 def IDA_1record(FEModel:mops.MDOFOpenSees, IM_list:list, EQRecordfile:str, period:float, 
     DeltaT = 'AsInRecord'):
@@ -27,8 +29,8 @@ def IDA_1record(FEModel:mops.MDOFOpenSees, IM_list:list, EQRecordfile:str, perio
 
     FEModel.UniqueRecorderPrefix = 'URP'+ Path(EQRecordfile).name +'_'
 
-    IDA_result = pd.DataFrame({'IM':[],'EQRecord':[],
-        'MaxDrift':[],'MaxAbsAccel':[],'MaxRelativeAccel':[],'ResDrift':[],'Iffinish':[]})
+    IDA_result = pd.DataFrame()
+    # IDA_result = pd.DataFrame({'IM':[],'EQRecord':[], 'MaxDrift':[],'MaxAbsAccel':[],'MaxRelativeAccel':[],'ResDrift':[],'Iffinish':[]})
 
     # calculate spectral acceleration
     p = Path(EQRecordfile)
@@ -46,7 +48,7 @@ def IDA_1record(FEModel:mops.MDOFOpenSees, IM_list:list, EQRecordfile:str, perio
             str(Path(EQRecordfile)), IM/SA, False, DeltaT)
         data = {'IM':IM,'EQRecord':EQRecordfile,'MaxDrift':[FEModel.MaxDrift],
             'MaxAbsAccel':[FEModel.MaxAbsAccel],'MaxRelativeAccel':[FEModel.MaxRelativeAccel],
-            'ResDrift':FEModel.ResDrift,'Iffinish':Iffinish}
+            'ResDrift':FEModel.ResDrift,'Iffinish':bool(Iffinish), 'tCurrent':tCurrent, 'TotalTime':TotalTime}
         IDA_result=pd.concat([IDA_result,pd.DataFrame(data)], ignore_index=True)
 
     return IDA_result
@@ -110,17 +112,15 @@ def SimulateEDPGivenIM(IDA_result:pd.DataFrame, IM_list:list, N_Sim, betaM:float
     # simulate EDP
     assert len(IM_list)==len(N_Sim)
     for IM,N in zip(IM_list,N_Sim):
-        lnEDPs_mean = IDA.interpMatrix(IM,IM_list_original,lnEDPs_mean_list_original)
-        lnEDPs_cov = IDA.interpMatrix(IM,IM_list_original,lnEDPs_cov_list_original,True)
+        lnEDPs_mean = IDA.interpMatrix(math.log(IM), [math.log(im) for im in IM_list_original], lnEDPs_mean_list_original)
+        lnEDPs_cov = IDA.interpMatrix(math.log(IM), [math.log(im) for im in IM_list_original], lnEDPs_cov_list_original, True)
         if N<10:
             N_real = 10
         else:
             N_real = N
-        W,_,_,_ = IDA.FEMACodeSimulatingEDPGivenlnMeanlncov(
-            lnEDPs_mean,lnEDPs_cov,betaM,N_real)
+        W,_,_,_ = IDA.FEMACodeSimulatingEDPGivenlnMeanlncov(lnEDPs_mean,lnEDPs_cov,betaM,N_real)
         W = W[0:N,:]
-        newdf = pd.DataFrame(np.concatenate((np.array([[IM]]*N),W),axis=1), 
-            columns=list(SimEDP.columns))
+        newdf = pd.DataFrame(np.concatenate((np.array([[IM]]*N),W),axis=1), columns=list(SimEDP.columns))
         SimEDP = pd.concat([SimEDP,newdf], ignore_index=True)
 
     return SimEDP
@@ -140,15 +140,25 @@ class IDA():
             period, DeltaT, NumPool)
         return self.IDA_result
 
-    def plot_IDA_results(IDA_result:pd.DataFrame, Stat:bool = False, FigName:str = 'IDA.jpg'):
+    def plot_IDA_results(IDA_result, Stat:bool = False, FigName:str = 'IDA.jpg'):
+        if isinstance(IDA_result, str):
+            # convert col types: MaxDrift MaxAbsAccel MaxRelativeAccel ResDrift
+            IDA_result = pd.read_csv(IDA_result, converters={
+                col: lambda x: np.fromstring(x.strip('[]'), sep=' ')
+                for col in ['MaxDrift', 'MaxAbsAccel', 'MaxRelativeAccel', 'ResDrift']
+            })
+        elif isinstance(IDA_result, pd.DataFrame):
+            pass
+        else:
+            raise ValueError('IDA_result should be a file name or a pandas DataFrame')
+
         cm = 1/2.54  # centimeters in inches
         fig, ax = plt.subplots()   # figsize=(8*cm, 6*cm)
         if not Stat:
             EQRecordFile_list = list(Counter(IDA_result['EQRecord'].values).keys())
             for EQRecordFile in EQRecordFile_list:
                 ind = (IDA_result['EQRecord']==EQRecordFile)
-                ax.plot([max(drlist) for drlist in IDA_result['MaxDrift'][ind].values], 
-                    IDA_result['IM'][ind].values)
+                ax.plot([max(drlist) for drlist in IDA_result['MaxDrift'][ind].values], IDA_result['IM'][ind].values)
         else:
             IM_list = list(Counter(list(IDA_result['IM'].values)).keys())
             EDPmax_median = []
@@ -163,11 +173,6 @@ class IDA():
             ax.plot(EDPmax_median,IM_list,'k',label='Median')
             ax.plot(EDPmax_1sigma_minus,IM_list,'b',label='-sigma')
             ax.plot(EDPmax_1sigma_plus,IM_list,'g',label='+sigma')
-
-        
-
-        plt.xlim(0,0.5)
-        plt.ylim(0,2)
 
         plt.xticks(fontproperties = 'Times New Roman', fontsize=12)
         plt.yticks(np.arange(0, 2, 0.2), fontproperties = 'Times New Roman', fontsize=12)
@@ -186,6 +191,9 @@ class IDA():
         plt.savefig(FigName, dpi=600, format='jpg', bbox_inches="tight")
         # 保存文件，dpi指定保存文件的分辨率
         # bbox_inches="tight" 可以保存图上所有的信息，不会出现横纵坐标轴的描述存掉了的情况
+
+        ax.set_xlim(left=0)
+        ax.set_ylim(bottom=0, top=max(IM_list))
 
         plt.show()
 
@@ -255,7 +263,9 @@ class IDA():
         
         # Find the square root of D2_use and call is D_use. 
         # 创建对角矩阵
-        D_use = np.diag(np.power(D2_use,0.5))
+        # 如果有任何负数，取为10**(-6)
+        D2_use[D2_use<0] = 10**(-6)
+        D_use = np.diag(np.power(D2_use, 0.5))
 
         # Generate Standard random numbers
         if lnEDPs_cov_rank >= num_var:

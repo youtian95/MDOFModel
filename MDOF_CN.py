@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import re
 
-import Alpha_CNcode as ACN
+from . import Alpha_CNcode as ACN
 
 class MDOF_CN:
 
@@ -35,6 +35,8 @@ class MDOF_CN:
     N = 0
     DampingRatio = 0.05 # damping ratio
     TypicalStoryHeight = 0 # (m)
+    # S# Spectral Acceleration at T1 with 475-year return period
+    Sa_T1 = 0 # g
     # backbone curve
     Vdi = []    # design strength (N)  (475-year return period)
     Vyi = []    # N
@@ -141,6 +143,9 @@ class MDOF_CN:
         alphaMax_major = ACN.alphaMax_CNcode('major',self.SeismicDesignLevel)
         alpha1_major = ACN.Alpha_CNcode(self.T1,Tg,alphaMax_major,self.DampingRatio)
 
+        # Sa(T1)
+        self.Sa_T1 = alpha1_medium
+
         # Vyi, betai, etai
         # Per GB 50011-2010
         kesi_y = 0.4 # Table 5.5.4, GB 50011-2010
@@ -187,14 +192,20 @@ class MDOF_CN:
         self.__init__(self.NumOfStories,self.FloorArea,self.StructuralType)
 
     def OutputStructuralParameters(self, filename):
+        if isinstance(filename, str):
+            if not filename.endswith('.csv'):
+                filename = filename + '.csv'
+            filename = Path(filename)
 
         data = {
             'damping ratio': [self.DampingRatio],
             'Hysteretic curve type': [self.HystereticCurveType],
             'Hysteretic parameter, tao': [self.tao],
-            'Typical story height (m)': [self.TypicalStoryHeight]
+            'Typical story height (m)': [self.TypicalStoryHeight],
+            'T1 (s)': self.T1,
+            'Sa(T1) (g)': self.Sa_T1
         }
-        pd.DataFrame(data).to_csv(filename +'.csv',index=0,sep=',')
+        pd.DataFrame(data).to_csv(filename,index=0,sep=',')
 
         yileddisp = np.array(self.Vyi)/self.K0
         designforce = np.array(self.Vdi)
@@ -213,7 +224,7 @@ class MDOF_CN:
             'Ultimage displacement (m)': ultdisp.tolist(),
             'Complete damage displacement (m)': self.DeltaCi,
         }
-        pd.DataFrame(data).to_csv(filename +'.csv',index=0,sep=',',mode='a')
+        pd.DataFrame(data).to_csv(filename,index=0,sep=',',mode='a')
 
     # Generate detailed structural types (like S2) according to reference [1], if only a general type (like S) is provided.
     # [1] FEMA. Hazus Inventory Technical Manual [R]. Hazus 4.2 SP3. FEMA, 2021.
@@ -254,34 +265,44 @@ class MDOF_CN:
 
     # Set seismic design level according to city
     # [1] GB 50011-2010(2016) Appendix A
-    def __Set_DesignLevelbyCity(self, city: str):
+    def __Set_DesignLevelbyCity(self, city: str, DistrictName: str = None):
         current_path = Path(__file__).resolve().parent
         GBApp_A = pd.read_csv(current_path/"./Resources/GB50011-2010(2016)-Appendix-A.csv",
             na_values='-')
-        Row = GBApp_A[GBApp_A['City'].str.contains(city,na=False)]
-        if Row.empty:
-            print("Error: cannot find such city")
-            raise SystemExit
+        GBApp_A['City'] = GBApp_A['City'].ffill()
+        CityName = city
+        Rows = GBApp_A[GBApp_A['City'].str.contains(CityName,na=False)]
+        if Rows.empty:
+            raise Exception(f'City {CityName} not found in GB50011-2010')
         else:
-            SDL = Row['Design Level'].values[-1]   
-            SDL = re.findall(r"\d+\.?\d*", SDL)[0]
-            PGA = Row['PGA'].values[-1]
-            PGA = re.findall(r"\d+\.?\d*", PGA)[0]
-            PGA = float(PGA)
-            alphaMax = PGA*2.4
-            if SDL == '8' and alphaMax == 0.3:
-                SDL = '8.5'
-            elif SDL == '7' and alphaMax == 0.15:
-                SDL = '7.5'
-            self.SeismicDesignLevel = SDL
-            EQGroup = Row['EQgroup'].values[-1]
-            if EQGroup[1] == '一':
-                EQGroup = '1'
-            elif EQGroup[1] == '二':
-                EQGroup = '2'
-            elif EQGroup[1] == '三':
-                EQGroup = '3'
-            self.EQGroup = EQGroup
+            # read row per district name
+            if not DistrictName: 
+                Row = Rows.iloc[0]
+            else:
+                Row = Rows[Rows['District'].str.contains(DistrictName,na=False)]
+
+            if Row.empty:
+                raise Exception(f'District {DistrictName} not found in {CityName} of GB50011-2010')
+            else:
+                SDL = Row['Design Level'].values[-1]   
+                SDL = re.findall(r"\d+\.?\d*", SDL)[0]
+                PGA = Row['PGA'].values[-1]
+                PGA = re.findall(r"\d+\.?\d*", PGA)[0]
+                PGA = float(PGA)
+                alphaMax = PGA*2.4
+                if SDL == '8' and alphaMax == 0.3:
+                    SDL = '8.5'
+                elif SDL == '7' and alphaMax == 0.15:
+                    SDL = '7.5'
+                self.SeismicDesignLevel = SDL
+                EQGroup = Row['EQgroup'].values[-1]
+                if EQGroup[1] == '一':
+                    EQGroup = '1'
+                elif EQGroup[1] == '二':
+                    EQGroup = '2'
+                elif EQGroup[1] == '三':
+                    EQGroup = '3'
+                self.EQGroup = EQGroup
 
     # Set site class according to location per GB 50011-2010(2016) Table 4.1.6
     # [1] GB 50011-2010(2016) Table 4.1.6

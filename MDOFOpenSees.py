@@ -11,10 +11,11 @@ from cmath import pi
 from openseespy.opensees import *
 import pandas as pd
 import numpy as np
-import ReadRecord
 from pathlib import Path
 import os
 import mpl_toolkits.axisartist as axisartist
+
+from . import ReadRecord
 
 class MDOFOpenSees():
 

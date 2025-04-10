@@ -32,6 +32,8 @@ class MDOF_LU:
     N = 0
     DampingRatio = 0.05 # damping ratio
     TypicalStoryHeight = 0 # (m)
+    # design strength coefficient
+    Cs = 0
     # backbone curve
     Vdi = []    # design strength, N
     Vyi = []    # N
@@ -108,6 +110,7 @@ class MDOF_LU:
 
         # Vyi, betai, etai
         Cs = HazusDataTable5_4[self.__SeismicDesignLevel][self.StructuralType]
+        self.Cs = Cs
         gamma = HazusDataTable5_5['overstrength ratio, yield, gamma'][self.StructuralType]
         lambda_ = HazusDataTable5_5['overstrength ratio, ultimate, lambda'][self.StructuralType]
         alpha1 = HazusDataTable5_5['modal factor, weight, alpha1'][self.StructuralType]
@@ -150,14 +153,20 @@ class MDOF_LU:
         self.__init__(self.NumOfStories,self.FloorArea,self.StructuralType)
 
     def OutputStructuralParameters(self, filename):
+        if isinstance(filename, str):
+            if not filename.endswith('.csv'):
+                filename = filename + '.csv'
+            filename = Path(filename)
 
         data = {
             'damping ratio': [self.DampingRatio],
             'Hysteretic curve type': [self.HystereticCurveType],
             'Hysteretic parameter, tao': [self.tao],
-            'Typical story height (m)': [self.TypicalStoryHeight]
+            'Typical story height (m)': [self.TypicalStoryHeight],
+            'T1 (s)': self.T1,
+            'Cs': self.Cs
         }
-        pd.DataFrame(data).to_csv(filename +'.csv',index=0,sep=',')
+        pd.DataFrame(data).to_csv(filename,index=0,sep=',')
 
         yileddisp = np.array(self.Vyi)/self.K0
         designforce = np.array(self.Vdi)
@@ -176,7 +185,7 @@ class MDOF_LU:
             'Ultimage displacement (m)': ultdisp.tolist(),
             'Complete damage displacement (m)': self.DeltaCi,
         }
-        pd.DataFrame(data).to_csv(filename +'.csv',index=0,sep=',',mode='a')
+        pd.DataFrame(data).to_csv(filename,index=0,sep=',',mode='a')
 
     def getDesignLevel(self):
         return self.__SeismicDesignLevel
