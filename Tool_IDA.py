@@ -84,12 +84,28 @@ def main(args):
     parser.add_argument('--NumofStories',type=int)
     parser.add_argument('--FloorArea',type=float)
     parser.add_argument('--StructuralType')
-    parser.add_argument('--DesignInfo', type=dict)
+    # Replace the dictionary argument with individual parameters
+    parser.add_argument('--DesignCode', default='CN', choices=['CN', 'Hazus'],
+                        help='Design code: CN or Hazus')
+    parser.add_argument('--DesignLevel', default='UNKNOWN')
+    parser.add_argument('--EQgroup', default='UNKNOWN')
+    parser.add_argument('--SiteClass', default='UNKNOWN')
+    # other parameters
     parser.add_argument('--EQMetaDataFile')
     parser.add_argument('--OutputCSVFile',default = 'IDA_result.csv')
     parser.add_argument('--SelfCenteringEnhancingFactor',
         default = 0, type=float)
+    parser.add_argument('--NumPool',default = 1, type=int)
+    parser.add_argument('--UseRelativeIM',default = False, type=bool)
     args = parser.parse_args(args)
+
+    # Convert DesignInfo to a dictionary
+    DesignInfo = {
+        'Code': args.DesignCode,
+        'SeismicDesignLevel': args.DesignLevel,
+        'EQgroup': args.EQgroup,
+        'SiteClass': args.SiteClass
+    }
 
     if args.IM_list is None:
         print("ERROR: wrong arguments!")
@@ -97,7 +113,8 @@ def main(args):
 
     main_IDA(args.IM_list,args.NumofStories,args.FloorArea,args.StructuralType,
         args.EQMetaDataFile,args.OutputCSVFile,args.SelfCenteringEnhancingFactor,
-        args.DesignInfo)
+        DesignInfo,
+        NumPool = args.NumPool, UseRelativeIM = args.UseRelativeIM)
 
 
 # test function
