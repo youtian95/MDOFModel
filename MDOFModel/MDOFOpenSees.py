@@ -437,17 +437,17 @@ class MDOFOpenSees():
 
         self.MaxDrift = pd.read_table(
             str(Path(self.outputdir,self.UniqueRecorderPrefix+'MaxDrift.txt')), 
-            sep='\s+', header=None).loc[2,:].values
+            sep=r'\s+', header=None).loc[2,:].values
         self.MaxAbsAccel = pd.read_table(
             str(Path(self.outputdir,self.UniqueRecorderPrefix+'MaxAbsAccel.txt')), 
-            sep='\s+', header=None).loc[2,:].values
+            sep=r'\s+', header=None).loc[2,:].values
         self.MaxRelativeAccel = pd.read_table(
             str(Path(self.outputdir,self.UniqueRecorderPrefix+'MaxRelativeAccel.txt')), 
-            sep='\s+', header=None).loc[2,:].values
+            sep=r'\s+', header=None).loc[2,:].values
         
         df = pd.read_table(
             str(Path(self.outputdir,self.UniqueRecorderPrefix+'DriftHistory.txt')), 
-            sep='\s+', header=None)
+            sep=r'\s+', header=None)
         self.DriftHistory = {}
         self.DriftHistory['time'] = df.loc[:,0]
         ind_last5sec = ((self.DriftHistory['time'][-1:]-self.DriftHistory['time'])<5.0)
@@ -460,7 +460,7 @@ class MDOFOpenSees():
 
         df = pd.read_table(
             str(Path(self.outputdir,self.UniqueRecorderPrefix+'ForceHistory.txt')), 
-            sep='\s+', header=None)
+            sep=r'\s+', header=None)
         self.ForceHistory = {}
         self.ForceHistory['time'] = df.loc[:,0]
         for i in range(self.NStories):
@@ -468,7 +468,7 @@ class MDOFOpenSees():
         
         df = pd.read_table(
             str(Path(self.outputdir,self.UniqueRecorderPrefix+'NodeAbsAccelHistory.txt')), 
-            sep='\s+', header=None)
+            sep=r'\s+', header=None)
         self.NodeAbsAccelHistory = {}
         self.NodeAbsAccelHistory['time'] = df.loc[:,0]
         for i in range(self.NStories):
@@ -476,7 +476,7 @@ class MDOFOpenSees():
 
         df = pd.read_table(
             str(Path(self.outputdir,self.UniqueRecorderPrefix+'NodeRelativeAccelHistory.txt')), 
-            sep='\s+', header=None)
+            sep=r'\s+', header=None)
         self.NodeRelativeAccelHistory = {}
         self.NodeRelativeAccelHistory['time'] = df.loc[:,0]
         for i in range(self.NStories):
@@ -486,7 +486,7 @@ class MDOFOpenSees():
 
         df = pd.read_table(
             str(Path(self.outputdir,self.UniqueRecorderPrefix+'DriftHistory.txt')), 
-            sep='\s+', header=None)
+            sep=r'\s+', header=None)
         self.DriftHistory = {}
         self.DriftHistory['time'] = df.loc[:,0]
         for i in range(self.NStories):
@@ -494,7 +494,7 @@ class MDOFOpenSees():
 
         df = pd.read_table(
             str(Path(self.outputdir,self.UniqueRecorderPrefix+'ForceHistory.txt')), 
-            sep='\s+', header=None)
+            sep=r'\s+', header=None)
         self.ForceHistory = {}
         self.ForceHistory['time'] = df.loc[:,0]
         for i in range(self.NStories):
@@ -502,7 +502,7 @@ class MDOFOpenSees():
 
         df = pd.read_table(
             str(Path(self.outputdir,self.UniqueRecorderPrefix+'NodeDispHistory.txt')), 
-            sep='\s+', header=None)
+            sep=r'\s+', header=None)
         self.NodeDispHistory = {}
         self.NodeDispHistory['time'] = df.loc[:,0]
         for i in range(self.NStories):

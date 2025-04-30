@@ -40,7 +40,7 @@ class MDOF_CN:
     # backbone curve
     Vdi = []    # design strength (N)  (475-year return period)
     Vyi = []    # N
-    betai = [] # overstrength ratio. Utlmate strength divided by yield strength
+    betai = [] # overstrength ratio. Utlimate strength divided by yield strength
     etai = [] # hardening ratio
     DeltaCi = [] # ultimate drift, meter
     # hysteretic parameters
@@ -284,9 +284,17 @@ class MDOF_CN:
             if Row.empty:
                 raise Exception(f'District {DistrictName} not found in {CityName} of GB50011-2010')
             else:
-                SDL = Row['Design Level'].values[-1]   
+                # If Row is a DataFrame, access values; if it's a Series, access directly
+                if isinstance(Row, pd.DataFrame):
+                    SDL = Row['Design Level'].values[-1]
+                    PGA = Row['PGA'].values[-1]
+                    EQGroup = Row['EQgroup'].values[-1]
+                else:  # Series
+                    SDL = Row['Design Level']
+                    PGA = Row['PGA']
+                    EQGroup = Row['EQgroup']
+                    
                 SDL = re.findall(r"\d+\.?\d*", SDL)[0]
-                PGA = Row['PGA'].values[-1]
                 PGA = re.findall(r"\d+\.?\d*", PGA)[0]
                 PGA = float(PGA)
                 alphaMax = PGA*2.4
@@ -295,7 +303,7 @@ class MDOF_CN:
                 elif SDL == '7' and alphaMax == 0.15:
                     SDL = '7.5'
                 self.SeismicDesignLevel = SDL
-                EQGroup = Row['EQgroup'].values[-1]
+                
                 if EQGroup[1] == '一':
                     EQGroup = '1'
                 elif EQGroup[1] == '二':
@@ -327,5 +335,5 @@ class MDOF_CN:
         self.SiteClass = SiteClass
 
 
-        
+
 

@@ -1,11 +1,14 @@
-import sys
 from pathlib import Path
 import os
-sys.path.append(str(Path(__file__).resolve().parents[1]))
+import sys
 
-import MDOF_LU as mlu
-import MDOF_CN as mcn
-import MDOFOpenSees as mops
+parent_dir = str(Path(__file__).parent.parent)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
+from MDOFModel import MDOF_LU as mlu
+from MDOFModel import MDOF_CN as mcn
+from MDOFModel import MDOFOpenSees as mops
 
 NumofStories = 3
 bld = mcn.MDOF_CN(NumofStories, 1000, 'S2', City='石家庄',longitude=114.52,latitude=38.05)

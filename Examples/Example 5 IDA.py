@@ -1,18 +1,21 @@
-import sys
-from pathlib import Path
-sys.path.append(str(Path(__file__).resolve().parents[1]))
-
-import IDA
-import MDOF_LU as mlu
-import MDOFOpenSees as mops
-import pandas as pd
-import numpy as np
 from pathlib import Path
 import time 
+import sys
+import pandas as pd
+import numpy as np
+
+parent_dir = str(Path(__file__).parent.parent)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
+from MDOFModel import IDA
+from MDOFModel import MDOF_LU as mlu
+from MDOFModel import MDOFOpenSees as mops
+import MDOFModel
 
 CFDir = Path(__file__).resolve().parent
 
-FEMAP695Dir = str((CFDir/'../Resources/FEMA_P-695_far-field_ground_motions').resolve())
+FEMAP695Dir = str(Path(MDOFModel.__file__).parent / 'Resources/FEMA_P-695_far-field_ground_motions')
 T:pd.DataFrame = pd.read_table(str(Path(FEMAP695Dir)/'MetaData.txt'),sep=',')
 EQRecordFile_list = [str(Path(FEMAP695Dir)/str.replace(x,'.txt',''))
     for x in T['AccelXfile'].to_list()] 
