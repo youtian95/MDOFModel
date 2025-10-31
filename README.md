@@ -2,7 +2,7 @@
 
 Generate Multi-Degree-Of-Freedom (MDOF) structures based on basic building information (such as floor area, number of stories, etc.), and perform dynamic analysis and economic loss assessment.
 
-[中文文档 (Chinese Documentation)](README_CN.md)
+[中文文档 (Chinese Documentation)](https://github.com/youtian95/MDOFModel/blob/master/README_CN.md)
 
 ## Project Introduction
 
