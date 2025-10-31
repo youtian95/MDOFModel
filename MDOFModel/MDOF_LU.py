@@ -132,7 +132,7 @@ class MDOF_LU:
         self.etai = [0] * self.N
         self.DeltaCi = [0] * self.N
         for i in range(self.N):
-            Gammai = 1.0 - i*(i+1.0)/(self.N+1.0)/self.N
+            Gammai = 1.0 - i*(i-1.0)/(self.N+1.0)/self.N
             self.Vyi[i] = SAy*alpha1*self.mass*9.8*self.N*Gammai
             self.Vdi[i] = self.Vyi[i]/gamma
             self.betai[i] = SAu / SAy
