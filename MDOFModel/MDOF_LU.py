@@ -38,7 +38,7 @@ class MDOF_LU:
     Vdi = []    # design strength, N
     Vyi = []    # N
     betai = [] # overstrength ratio. Utlmate strength divided by yield strength
-    etai = [] # hardening ratio
+    etai = [] # hardening ratio. post-yield stiffness divided by initial elastic stiffness
     DeltaCi = [] # ultimate drift, meter
     # hysteretic parameters
     tao = []
@@ -132,7 +132,8 @@ class MDOF_LU:
         self.etai = [0] * self.N
         self.DeltaCi = [0] * self.N
         for i in range(self.N):
-            Gammai = 1.0 - i*(i+1.0)/(self.N+1.0)/self.N
+            # 注意i从0开始
+            Gammai = 1.0 - (i+1.0)*i/(self.N+1.0)/self.N
             self.Vyi[i] = SAy*alpha1*self.mass*9.8*self.N*Gammai
             self.Vdi[i] = self.Vyi[i]/gamma
             self.betai[i] = SAu / SAy
