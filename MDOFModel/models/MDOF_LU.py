@@ -55,7 +55,7 @@ class MDOF_LU:
         self.__Update_DesignLevel()
 
         # read hazus data
-        current_directory = Path(__file__).resolve().parent
+        current_directory = Path(__file__).resolve().parent.parent
         HazusDataTable5_5 = pd.read_csv(current_directory/"Resources/HazusData Table 5.5.csv",
             index_col='building type')
         HazusDataTable5_1 = pd.read_csv(current_directory/"Resources/HazusData Table 5.1.csv",
@@ -192,7 +192,7 @@ class MDOF_LU:
         return self.__SeismicDesignLevel
 
     def __Read_StructuralType(self,StructuralType):
-        current_directory = Path(__file__).resolve().parent
+        current_directory = Path(__file__).resolve().parent.parent
         HazusInventoryTable4_2 = pd.read_csv(current_directory/"Resources/HazusInventory Table 4-2.csv",
             index_col=0, header=0)
         rownames = HazusInventoryTable4_2.index.to_list()
@@ -227,7 +227,7 @@ class MDOF_LU:
             self.StructuralType = StructuralType + ' is UNKNOWN'
 
     def __Update_DesignLevel(self):
-        current_directory = Path(__file__).resolve().parent
+        current_directory = Path(__file__).resolve().parent.parent
         HazusDataTable5_4 = pd.read_csv(current_directory / "Resources/HazusData Table 5.4.csv",
             index_col='building type')
         Cs = HazusDataTable5_4[self.__SeismicDesignLevel][self.StructuralType]

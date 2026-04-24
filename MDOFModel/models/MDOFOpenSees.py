@@ -15,7 +15,7 @@ from pathlib import Path
 import os
 import mpl_toolkits.axisartist as axisartist
 
-from . import ReadRecord
+from ..analysis import ReadRecord
 
 class MDOFOpenSees():
 

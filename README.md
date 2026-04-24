@@ -2,7 +2,7 @@
 
 Generate Multi-Degree-Of-Freedom (MDOF) structures based on basic building information (such as floor area, number of stories, etc.), and perform dynamic analysis and economic loss assessment.
 
-[中文文档 (Chinese Documentation)](https://github.com/youtian95/MDOFModel/blob/master/README_CN.md)
+[中文文档 (Chinese Documentation)](README_CN.md)
 
 ## Project Introduction
 
@@ -15,7 +15,6 @@ MDOFModel is a Python library for Multi-Degree-Of-Freedom (MDOF) model analysis 
 - **Pushover Analysis**: Implement structural static pushover analysis
 - **Incremental Dynamic Analysis (IDA)**: Execute IDA analysis using FEMA P-695 far-field earthquake records
 - **Loss Assessment**: Conduct seismic loss assessment based on Hazus methodology
-- **OpenSees Integration**: Seamless integration with OpenSees
 
 ## Installation Guide
 
@@ -25,64 +24,22 @@ Install this library using pip:
 pip install MDOFModel
 ```
 
-### Dependencies
-
-- Python >= 3.12
-- numpy
-- pandas
-- matplotlib
-- openseespy
-- openpyxl
-- eqsig
-
 ## Usage Examples
 
-### Example 1: Dynamic Analysis
+Please refer to the Examples directory in this repository for detailed usage examples. We provide several ready-to-run scripts demonstrating different capabilities of MDOFModel:
 
-```python
-from MDOFModel import MDOF_CN as mcn
-from MDOFModel import MDOFOpenSees as mops
+- **Example1_ShearBuildingModel**: A collection of examples demonstrating a simplified shear building model for:
+  - 1_Dynamic.py: Time history dynamic analysis.
+  - 2_Pushover.py: Static pushover analysis.
+  - 3_LossAssessment.py: Economic loss assessment.
+  - 4_IDA.py: Incremental Dynamic Analysis (IDA).
+  - 5_EQSpectra.py: Earthquake spectra processing.
 
-# Create a 3-story structure model
-NumofStories = 3
-bld = mcn.MDOF_CN(NumofStories, 1000, 'S2', City='Shijiazhuang',longitude=114.52,latitude=38.05)
-bld.OutputStructuralParameters('structural parameters')
+- **Example2_GeneralModel_Dynamic**: Demonstrates how to perform dynamic time-history analysis on a general OpenSees structural model (e.g., 2D frame) using GeneralModelWrapper.
 
-# Perform dynamic analysis
-fe = mops.MDOFOpenSees(NumofStories, [bld.mass]*bld.N, [bld.K0]*bld.N, bld.DampingRatio,
-    bld.HystereticCurveType, bld.Vyi, bld.betai, bld.etai, bld.DeltaCi, bld.tao)
-fe.DynamicAnalysis('H-E12140', 3.0, True)
+- **Example3_GeneralModel_Pushover**: Demonstrates how to perform static pushover analysis on a general OpenSees structural model using GeneralModelWrapper.
 
-# Plot story drift time history
-fe.PlotForceDriftHistory(1)
-```
-
-### Example 2: Incremental Dynamic Analysis (IDA)
-
-```python
-from MDOFModel import IDA
-from MDOFModel import MDOF_LU as mlu
-from MDOFModel import MDOFOpenSees as mops
-import numpy as np
-
-# Create structural model
-NumofStories = 3
-bld = mlu.MDOF_LU(NumofStories, 3600, 'S2')
-bld.set_DesignLevel('pre-code')
-
-# Set up OpenSees model
-fe = mops.MDOFOpenSees(NumofStories, [bld.mass]*bld.N, [bld.K0]*bld.N, bld.DampingRatio,
-    bld.HystereticCurveType, bld.Vyi, bld.betai, bld.etai, bld.DeltaCi, bld.tao)
-
-# Perform IDA analysis
-IM_list = np.linspace(0.1, 2.0, 10).tolist()
-IDA_obj = IDA.IDA(fe)
-IDA_result = IDA_obj.Analyze(IM_list, EQRecordFile_list, bld.T1)
-
-# Save and plot results
-IDA_result.to_csv('IDA_results.csv')
-IDA.IDA.plot_IDA_results(IDA_result, Stat=True, FigName='IDA.jpg')
-```
+- **Example4_GeneralModel_IDA**: Demonstrates how to execute Incremental Dynamic Analysis (IDA) on a general OpenSees structural model using GeneralModelWrapper.
 
 ## Main Modules Description
 

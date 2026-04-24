@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import re
 
-from . import Alpha_CNcode as ACN
+from ..utils import Alpha_CNcode as ACN
 
 class MDOF_CN:
 
@@ -78,7 +78,7 @@ class MDOF_CN:
         self.mass = self.__FloorUnitMass * self.FloorArea
 
         # read hazus data
-        current_path = Path(__file__).resolve().parent
+        current_path = Path(__file__).resolve().parent.parent
         HazusDataTable5_5 = pd.read_csv(current_path/"./Resources/HazusData Table 5.5.csv",
             index_col='building type')
         HazusDataTable5_1 = pd.read_csv(current_path/"./Resources/HazusData Table 5.1.csv",
@@ -230,7 +230,7 @@ class MDOF_CN:
     # Generate detailed structural types (like S2) according to reference [1], if only a general type (like S) is provided.
     # [1] FEMA. Hazus Inventory Technical Manual [R]. Hazus 4.2 SP3. FEMA, 2021.
     def __Read_StructuralType(self,StructuralType):
-        current_path = Path(__file__).resolve().parent
+        current_path = Path(__file__).resolve().parent.parent
         HazusInventoryTable4_2 = pd.read_csv(current_path/"./Resources/HazusInventory Table 4-2.csv",
             index_col=0, header=0)
         rownames = HazusInventoryTable4_2.index.to_list()
@@ -267,7 +267,7 @@ class MDOF_CN:
     # Set seismic design level according to city
     # [1] GB 50011-2010(2016) Appendix A
     def __Set_DesignLevelbyCity(self, city: str, DistrictName: str = None):
-        current_path = Path(__file__).resolve().parent
+        current_path = Path(__file__).resolve().parent.parent
         GBApp_A = pd.read_csv(current_path/"./Resources/GB50011-2010(2016)-Appendix-A.csv",
             na_values='-')
         GBApp_A['City'] = GBApp_A['City'].ffill()
@@ -317,7 +317,7 @@ class MDOF_CN:
     # [1] GB 50011-2010(2016) Table 4.1.6
     # [2] Zhou J, Li X, Tian X, Xu G. New Framework of Combining Observations with Topographic Slope to Estimate VS30 and Its Application on Building a VS30 Map for Mainland China. Bulletin of the Seismological Society of America, 2022, 112(4): 2049-2069.
     def __Set_SiteClassbyLoc(self, Longitude: float, Latitude: float):
-        current_path = Path(__file__).resolve().parent
+        current_path = Path(__file__).resolve().parent.parent
         VS30Table = pd.read_excel(current_path/"./Resources/China_Mainland_SCK_Vs30.xlsx",header=1)
         distances = np.sqrt((VS30Table['Longitude (°)'] - Longitude)**2 \
             + (VS30Table['Latitude (°)'] - Latitude)**2)

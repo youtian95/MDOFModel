@@ -23,11 +23,11 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 
-from . import MDOF_LU as mlu
-from . import MDOFOpenSees as mops
+from ..models import MDOF_LU as mlu
+from ..models import MDOFOpenSees as mops
 from . import BldLossAssessment as bl
-from . import IDA
-from . import Alpha_CNcode as ACN
+from ..analysis import IDA
+from ..utils import Alpha_CNcode as ACN
 
 def DynamicAnalysis_1Sim(NumofStories,FloorArea,StructuralType,OccupancyClass,
     DesignInfo,EQRecordFile,EQScaling,OutputDir,SelfCenteringEnhancingFactor):

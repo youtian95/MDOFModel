@@ -2,13 +2,9 @@ from pathlib import Path
 import os
 import sys
 
-parent_dir = str(Path(__file__).parent.parent)
-if parent_dir not in sys.path:
-    sys.path.insert(0, parent_dir)
-
-from MDOFModel import MDOF_LU as mlu
-from MDOFModel import MDOFOpenSees as mops
-from MDOFModel import BldLossAssessment as bl
+from MDOFModel.models import MDOF_LU as mlu
+from MDOFModel.models import MDOFOpenSees as mops
+from MDOFModel.loss import BldLossAssessment as bl
 
 NumofStories = 3
 bld = mlu.MDOF_LU(NumofStories, 3600, 'S2')

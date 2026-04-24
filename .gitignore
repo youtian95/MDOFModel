@@ -3,7 +3,18 @@
 
 **/.*
 
+Examples/*.txt
+Examples/*output/
+Examples/*/Output/
+Examples/Example*/Output/
+
+.opensees_tmp/
+
 **/temp/
+**/temp_*.dat
+**/*disp.out
+**/*accel.out
+**/*basedisp.out
 
 dist/
 build/

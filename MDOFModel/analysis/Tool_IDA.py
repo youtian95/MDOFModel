@@ -13,9 +13,9 @@ import sys
 from pathlib import Path
 import pandas as pd
 
-from . import MDOF_LU as mlu
-from . import MDOF_CN as mcn
-from . import MDOFOpenSees as mops
+from ..models import MDOF_LU as mlu
+from ..models import MDOF_CN as mcn
+from ..models import MDOFOpenSees as mops
 from . import IDA
 
 # DesignInfo['Code'] = 'Hazus' / 'CN'
@@ -73,7 +73,7 @@ def main_IDA(IM_list,NumofStories,FloorArea,StructuralType,
             Sa_T1 = bld.Sa_T1
         IM_list = [IM_list[i]*Sa_T1 for i in range(len(IM_list))]
 
-    IDA_obj = IDA.IDA(fe)
+    IDA_obj = IDA.IDAAnalysis(fe)
     IDA_result = IDA_obj.Analyze(IM_list, EQRecordFile_list, bld.T1, DeltaT=0.1, NumPool=NumPool)
 
     IDA_result.to_csv(Path(OutputCSVFile), index=False, encoding='utf-8-sig')

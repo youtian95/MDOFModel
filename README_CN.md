@@ -1,94 +1,53 @@
 # MDOFModel
 
-根据建筑基本信息（面积、层数等）生成多自由度(MDOF)结构，并进行动力分析、经济损失分析等。
+根据建筑基本信息（如建筑面积、层数等）生成多自由度(MDOF)结构，并进行动力分析和经济损失评估。
+
+[English Documentation](README.md)
 
 ## 项目介绍
 
-MDOFModel是一个用于结构工程中多自由度(MDOF)模型分析的Python库，主要用于地震工程分析。该工具可以通过基本建筑信息生成集中质量有限元模型，进行动力分析、推覆分析、损失评估和增量动力分析(IDA)等。
+MDOFModel 是一个用于结构工程中多自由度（MDOF）模型分析的 Python 库，主要用于地震工程分析。该工具可以通过基本建筑信息自动生成集中质量有限元模型，进行动力时程分析、静力推覆分析、损失评估以及增量动力分析（IDA）。
 
 ## 功能特点
 
-- **结构模型生成**：基于基本建筑参数(如层数、面积、结构类型)生成MDOF结构模型
-- **地震动力分析**：进行线性和非线性时程分析
-- **推覆分析**：实施结构静力推覆分析
-- **增量动力分析(IDA)**：采用FEMA P-695远场地震记录执行IDA分析
-- **损失评估**：基于Hazus方法进行地震损失评估
-- **OpenSees集成**：与OpenSees进行无缝对接
+- **结构模型生成**：基于基本建筑参数（如层数、建筑面积、结构类型）生成 MDOF 结构模型
+- **地震动力分析**：执行线性和非线性时程分析
+- **推覆分析 (Pushover)**：实施结构静力推覆分析
+- **增量动力分析 (IDA)**：采用 FEMA P-695 远场地震动记录执行 IDA 分析
+- **损失评估**：基于 Hazus 方法进行地震经济损失评估
 
 ## 安装说明
 
-使用pip安装本库：
+使用 pip 安装本库：
 
 ```bash
 pip install MDOFModel
 ```
 
-### 依赖项
-
-- Python >= 3.12
-- numpy
-- pandas
-- matplotlib
-- openseespy
-- openpyxl
-- eqsig
-
 ## 使用示例
 
-### 示例1：动力分析
+详细的使用示例请参考本代码库中的 `Examples` 目录。我们提供了几个可直接独立运行的脚本形式的例子，用于演示 MDOFModel 各种不同的功能：
 
-```python
-from MDOFModel import MDOF_CN as mcn
-from MDOFModel import MDOFOpenSees as mops
+- **Example1_ShearBuildingModel**：包含一系列演示简化剪切型（Shear Building）建筑模型的脚本集合：
+  - `1_Dynamic.py`：时程动力分析。
+  - `2_Pushover.py`：静力推覆分析。
+  - `3_LossAssessment.py`：经济损失评估。
+  - `4_IDA.py`：增量动力分析 (IDA)。
+  - `5_EQSpectra.py`：地震动反应谱处理与绘图。
 
-# 创建3层结构模型
-NumofStories = 3
-bld = mcn.MDOF_CN(NumofStories, 1000, 'S2', City='石家庄',longitude=114.52,latitude=38.05)
-bld.OutputStructuralParameters('structural parameters')
+- **Example2_GeneralModel_Dynamic**：演示如何使用 `GeneralModelWrapper` 包装器对一般 OpenSees 结构模型（例如二维框架结构）进行动力时程分析。
 
-# 执行动力分析
-fe = mops.MDOFOpenSees(NumofStories, [bld.mass]*bld.N, [bld.K0]*bld.N, bld.DampingRatio,
-    bld.HystereticCurveType, bld.Vyi, bld.betai, bld.etai, bld.DeltaCi, bld.tao)
-fe.DynamicAnalysis('H-E12140', 3.0, True)
+- **Example3_GeneralModel_Pushover**：演示如何使用 `GeneralModelWrapper` 对一般 OpenSees 结构模型进行静力推覆分析并可视化结构。
 
-# 绘制层间位移时程
-fe.PlotForceDriftHistory(1)
-```
-
-### 示例2：增量动力分析(IDA)
-
-```python
-from MDOFModel import IDA
-from MDOFModel import MDOF_LU as mlu
-from MDOFModel import MDOFOpenSees as mops
-import numpy as np
-
-# 创建结构模型
-NumofStories = 3
-bld = mlu.MDOF_LU(NumofStories, 3600, 'S2')
-bld.set_DesignLevel('pre-code')
-
-# 设置OpenSees模型
-fe = mops.MDOFOpenSees(NumofStories, [bld.mass]*bld.N, [bld.K0]*bld.N, bld.DampingRatio,
-    bld.HystereticCurveType, bld.Vyi, bld.betai, bld.etai, bld.DeltaCi, bld.tao)
-
-# 执行IDA分析
-IM_list = np.linspace(0.1, 2.0, 10).tolist()
-IDA_obj = IDA.IDA(fe)
-IDA_result = IDA_obj.Analyze(IM_list, EQRecordFile_list, bld.T1)
-
-# 保存和绘制结果
-IDA_result.to_csv('IDA_results.csv')
-IDA.IDA.plot_IDA_results(IDA_result, Stat=True, FigName='IDA.jpg')
-```
+- **Example4_GeneralModel_IDA**：演示如何使用 `GeneralModelWrapper` 对一般 OpenSees 结构模型执行多线程增量动力分析 (IDA)。
 
 ## 主要模块说明
 
-- **MDOF_CN**: 基于中国规范的多自由度模型生成
-- **MDOF_LU**: 通用多自由度模型生成
-- **MDOFOpenSees**: OpenSees接口，用于建模和分析
-- **IDA**: 增量动力分析
-- **BldLossAssessment**: 建筑损失评估
-- **Tool_IDA**: IDA分析辅助工具
-- **Tool_LossAssess**: 损失评估辅助工具
-- **ReadRecord**: 地震记录读取工具
+- **MDOF_CN**：基于中国规范的多自由度模型生成
+- **MDOF_LU**：通用的多自由度模型生成
+- **MDOFOpenSees**：用于建模和分析的 OpenSees 接口
+- **IDA**：增量动力分析计算模块
+- **BldLossAssessment**：建筑损失评估模块
+- **Tool_IDA**：IDA 分析辅助后处理工具
+- **Tool_LossAssess**：损失评估辅助工具
+- **ReadRecord**：地震动记录读取与解析工具
