@@ -36,10 +36,10 @@ if __name__ == '__main__':
     print("====== 开始运行 GeneralModelWrapper 的测试分析 ======")
 
     # 生成由 0.1g 到 2.0g 的10点长的一系列IM作为IDA输入
-    IM_list = np.linspace(0.1, 1.0, 10).tolist()
+    IM_list = np.linspace(0.1, 2.0, 5).tolist()
     
     IDA_obj = IDA.IDAAnalysis(wrapper_model)
-    IDA_result = IDA_obj.Analyze(IM_list, NumPool=4)
+    IDA_result = IDA_obj.Analyze(IM_list, NumPool=8)
 
     IDA_result.to_csv(CFDir/'IDA_results.csv')
 

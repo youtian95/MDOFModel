@@ -277,16 +277,16 @@ class PelicunLossAssessment:
 
     def LossAssessment(
         self,
+        ImLevel: float,
         MaxDrift,
         MaxAccel,
+        MaxFloorVel=None,
+        MaxResDrift=None,
         StructuralCmp: 'pd.DataFrame | None' = None,
         ReplacementCost: float = None,
         CollapseMedian: float = None,
         CollapseLogStd: float = 0.4,
         PrintLog: bool = False,
-        MaxResDrift=None,
-        MaxFloorVel=None,
-        ImLevel: float = None,
         OutputDir: 'str | Path | None' = None,
     ) -> dict:
         """
@@ -317,13 +317,20 @@ class PelicunLossAssessment:
             是否将 Pelicun 运行日志打印到终端，默认 False。
         CollapseMedian : float, optional
             倒塌易损性中值 Sa（g）。若为 None 则不写入倒塌配置。
+            写入 pelicun 配置时会自动转换为其所需的 m/s²。
         CollapseLogStd : float
-            倒塌易损性对数标准差，默认 0.4。
+            倒塌易损性对数标准差，默认 0.4；倒塌能力按对数正态分布处理。
         MaxResDrift : array-like, shape (n_records, NumOfStories) or (n_records,), optional
             各条地震记录残余层间位移角（RID），单位 rad。
             若为一维数组，各层共用同一最大值。
             若提供，启用 FEMA P-58 不可修复损失评估（``IrreparableDamage``）。
             若为 None，则跳过残余位移相关计算。
+        MaxFloorVel : array-like, shape (n_records, NumOfStories+1) or (n_records,), optional
+            各条地震记录各楼面最大绝对速度，单位 m/s。
+            第 0 列为地面层速度，第 i 列为第 i 层楼面速度。
+            若为 None，则跳过楼层速度相关计算。
+        ImLevel : float
+            输入的地震动水平（IM），用于标识当前评估的地震动强度。单位为 g。
         OutputDir : str or Path, optional
             输出文件夹路径。若为 None，则默认使用当前工作目录下的 ``pelicun_output/``。
             文件夹在评估完成后保留，可用于调试检查。
@@ -586,7 +593,8 @@ class PelicunLossAssessment:
         - 当 max_res_drift 不为 None 时，启用 ``IrreparableDamage``，参数取自
           ``self.IrreparableMedian`` 与 ``self.IrreparableLogStd``。
         - 当 collapse_median 不为 None 时，写入 ``CollapseFragility``（以 SA 为
-          需求类型）。
+          需求类型）。本封装的 collapse_median 输入单位为 g；pelicun 在
+          ``length=m`` 配置下要求 SA 容量使用 m/s^2，因此写入配置前需要转换。
 
         返回 JSON 文件的绝对路径字符串。
         """
@@ -604,15 +612,20 @@ class PelicunLossAssessment:
                 'DriftCapacityLogStd': self.IrreparableLogStd,
             }
         if collapse_median is not None:
+            # pelicun 的 CollapseFragility 不支持在 CapacityMedian 字段中直接写
+            # "1.5 g" 这样的带单位字符串；它会根据 Demand Unit 转换纯数值。
+            # 这里 GeneralInformation.units.length 固定为 m，因此 SA 容量单位为 m/s^2。
+            g_to_mps2 = 9.80665
             damage_cfg['CollapseFragility'] = {
-                'DemandType':      'SA',
-                'CapacityMedian':  float(collapse_median),
-                'Theta_1':         float(collapse_logstd),
+                'DemandType':           'SA',
+                'CapacityDistribution': 'lognormal',
+                'CapacityMedian':       float(collapse_median) * g_to_mps2,
+                'Theta_1':              float(collapse_logstd),
             }
 
         dl_config: dict = {
             'GeneralInformation': {
-                'units': {'length': 'ft'},
+                'units': {'length': 'm'},
             },
             'DL': {
                 'Demands': demands_cfg,

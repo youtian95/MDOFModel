@@ -85,7 +85,6 @@ if __name__ == '__main__':
         FloorArea_sqft      = FLOOR_AREA_SQFT,
         OccupancyType       = OCCUPANCY_TYPE,
         SampleSize          = 500,
-        Seed                = 415,
         IrreparableMedian   = 0.01,
         IrreparableLogStd   = 0.3,
     )
