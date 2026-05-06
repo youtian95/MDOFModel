@@ -13,6 +13,12 @@ class GeneralModelWrapper:
     """
     一个用于将通用二维或三维 OpenSeesPy 模型封装以供 MDOFModel.IDA 并行分析模块使用的适配器。
     只要你通过该 Wrapper 指定哪一层对应哪些节点、每层的高度，IDA 模块就可以正常提取位移、漂移和加速度等 EDP 并在多进程中反复调用。
+
+    当前 IDA -> Pelicun 损失评估工作流默认采用 mm-N-s 单位体系：
+    - 节点坐标、层高和位移单位为 mm；
+    - 加速度单位为 mm/s²；
+    - 速度单位为 mm/s；
+    - 地震波输入记录通常为 g，默认通过 ``g_factor=9800.0`` 转换到 mm/s²。
     """
 
     # === 公开属性 (供 IDA 或外部提取的结果与配置) ===
@@ -26,18 +32,18 @@ class GeneralModelWrapper:
     """list[float]: 单次动力分析完成后提取的各楼层最大层间位移角。格式为浮点数列表，长度对应总楼层数量（如 [一层角, 二层角, ...]）。"""
     
     MaxAbsAccel: list = []
-    """list[float]: 单次动力分析完成后提取的各楼层最大绝对加速度（含地面运动激励参数）。格式为浮点数列表，长度对应楼层数量。"""
+    """list[float]: 单次动力分析完成后提取的各楼层最大绝对加速度（默认单位 mm/s²，含地面运动激励参数）。格式为浮点数列表，长度对应楼层数量。"""
     
     MaxRelativeAccel: list = []
-    """list[float]: 单次动力分析完成后提取的各楼层最大相对加速度（相对底部的自身加速度）。格式为浮点数列表，长度对应楼层数量。"""    
+    """list[float]: 单次动力分析完成后提取的各楼层最大相对加速度（默认单位 mm/s²，相对底部的自身加速度）。格式为浮点数列表，长度对应楼层数量。"""    
 
     MaxAbsVel: list = []
-    """list[float]: 单次动力分析完成后提取的各楼层最大绝对速度（模型单位/s）。
+    """list[float]: 单次动力分析完成后提取的各楼层最大绝对速度（默认单位 mm/s）。
     列表长度 = len(floor_nodes)，不含地面层。
     """    
 
     MaxRelativeVel: list = []
-    """list[float]: 单次动力分析完成后提取的各楼层最大相对速度（相对地面的速度，模型单位/s）。
+    """list[float]: 单次动力分析完成后提取的各楼层最大相对速度（默认单位 mm/s，相对地面的速度）。
     列表长度 = len(floor_nodes)，不含地面层。
     """
 
@@ -71,12 +77,12 @@ class GeneralModelWrapper:
     """int: [内部参数] 主要控制、提取及地震激励所作用的自由度方向编号 (例如 1代表X向，2代表Y向，3代表Z向)。"""
     
     _g_factor: float
-    """float: [内部参数] 重力加速度及地震波加速度比例系数。当地震波或自动重力计算采用 mm 制时，常设置为 9800.0；若采用 m，则是 9.806 等。"""
+    """float: [内部参数] 重力加速度及地震波加速度比例系数。默认 9800.0，对应 mm-N-s 单位体系。"""
 
     T1: float = 0.0
     """float: 结构在指定自由度方向的第一阶基本平动周期，初始化时自动计算。当无法完成特征值屈曲分析时为 0.0。"""
 
-    def __init__(self, build_model_func: Callable, floor_nodes: List[int], story_heights: List[float], dof: int = 1, base_nodes: Optional[List[int]] = None, g_factor: float = 9.806):
+    def __init__(self, build_model_func: Callable, floor_nodes: List[int], story_heights: List[float], dof: int = 1, base_nodes: Optional[List[int]] = None, g_factor: float = 9800.0):
         """
         Parameters
         ----------
@@ -85,13 +91,14 @@ class GeneralModelWrapper:
         floor_nodes : List[int]
             每层位移/加速度记录所对应的目标节点标签列表（从下到上，例如 [103, 203, 303...]）。
         story_heights : List[float]
-            每层的层高（对应 floor_nodes 的数量，必须相同）。如果第一层高3m，第二层高3m，则为 [3000, 3000]（取决于单位）。
+            每层的层高（对应 floor_nodes 的数量，必须相同）。默认单位为 mm；例如第一层高 3m、第二层高 3m，则为 [3000, 3000]。
         dof : int, optional
             地震输入与反应提取的自由度方向，默认 1 (x方向)。
         base_nodes : List[int], optional
             底层或基底节点标签列表。用于计算第一层相对基底的位移与漂移。如果不提供，默认为 [1] 或者认为基底无位移。
         g_factor : float, optional
-            将 'g' 单位转换为模型物理单位的倍乘系数。如果模型是 mm 则是 9800，m 则是 9.806 (默认 m/s2)。
+            将 'g' 单位转换为模型物理单位的倍乘系数。默认 9800.0，对应 mm/s²。
+            目前 IDA -> Pelicun 后处理假定 GeneralModelWrapper 的 IDA 输出采用 mm/s² 和 mm/s。
         """
         self.build_model_func = build_model_func
         self._floor_nodes = floor_nodes
