@@ -398,9 +398,20 @@ class PelicunLossAssessment:
             )
 
         # ── 5. 读取聚合损失结果 ───────────────────────────────────────────────
-        # DV_repair_agg.zip 列名格式：
+        # 不同 pelicun 版本对同一 BldgRepair 模块使用过两种输出文件名：
+        # DV_repair_agg.zip 与 DV_bldg_repair_agg.zip。配置仍只使用 BldgRepair。
         #   repair_cost / repair_time-sequential / repair_time-parallel
-        agg_zip = output_dir / 'DV_repair_agg.zip'
+        agg_candidates = [
+            output_dir / 'DV_repair_agg.zip',
+            output_dir / 'DV_bldg_repair_agg.zip',
+        ]
+        agg_zip = next((p for p in agg_candidates if p.exists()), None)
+        if agg_zip is None:
+            names = ', '.join(p.name for p in agg_candidates)
+            raise FileNotFoundError(
+                f'未找到 pelicun 聚合修复损失输出文件。期望文件之一: {names}; '
+                f'输出目录: {output_dir}'
+            )
         agg_repair = pd.read_csv(agg_zip, index_col=0, compression='zip')
         self.AggLoss = agg_repair
 
@@ -623,6 +634,12 @@ class PelicunLossAssessment:
                 'Theta_1':              float(collapse_logstd),
             }
 
+        repair_cfg: dict = {
+            'ConsequenceDatabase': 'FEMA P-58',
+            'MapApproach':         'Automatic',
+            'DecisionVariables':   {'Cost': True, 'Time': True},
+        }
+
         dl_config: dict = {
             'GeneralInformation': {
                 'units': {'length': 'm'},
@@ -637,11 +654,7 @@ class PelicunLossAssessment:
                 },
                 'Damage': damage_cfg,
                 'Losses': {
-                    'Repair': {
-                        'ConsequenceDatabase': 'FEMA P-58',
-                        'MapApproach':         'Automatic',
-                        'DecisionVariables':   {'Cost': True, 'Time': True},
-                    },
+                    'BldgRepair': repair_cfg,
                 },
                 'Options': {
                     'Seed':     self.Seed,
@@ -649,10 +662,27 @@ class PelicunLossAssessment:
                     'LogFile':  str(work_dir / 'pelicun_log.txt'),
                     'Sampling': {'SampleSize': sample_size},
                 },
-                # 仅输出聚合损失样本，最小化写盘量
                 'Outputs': {
+                    'Demand': {
+                        'Sample': True,
+                        'Statistics': True,
+                    },
+                    'Asset': {
+                        'Sample': True,
+                        'Statistics': True,
+                    },
+                    'Damage': {
+                        'Sample': True,
+                        'Statistics': True,
+                        'GroupedSample': True,
+                        'GroupedStatistics': True,
+                    },
                     'Loss': {
-                        'Repair': {
+                        'BldgRepair': {
+                            'Sample':              True,
+                            'Statistics':          True,
+                            'GroupedSample':       True,
+                            'GroupedStatistics':   True,
                             'AggregateSample':     True,
                             'AggregateStatistics': True,
                         },
@@ -663,7 +693,7 @@ class PelicunLossAssessment:
         }
 
         if replacement_cost is not None:
-            dl_config['DL']['Losses']['Repair']['ReplacementCost'] = {
+            dl_config['DL']['Losses']['BldgRepair']['ReplacementCost'] = {
                 'Median': float(replacement_cost),
                 'Unit':   'USD_2011',
             }
@@ -680,7 +710,7 @@ class PelicunLossAssessment:
 
         支持两种格式：
         - MultiIndex：pelicun 内部 API 直接返回的 (dv, category) 格式
-        - 简单字符串：从 DV_repair_agg.zip 读取的 'repair_cost',
+        - 简单字符串：从 DV_repair_agg.zip / DV_bldg_repair_agg.zip 读取的 'repair_cost',
           'repair_time-sequential', 'repair_time-parallel' 等格式
         """
         if df is None or len(df.columns) == 0:
