@@ -5,6 +5,7 @@ from typing import Callable, List, Optional
 import opsvis as opsv
 import matplotlib.pyplot as plt
 import sys
+import eqsig.single
 
 from ..analysis.ReadRecord import ReadRecord
 
@@ -28,8 +29,18 @@ class GeneralModelWrapper:
     """list[float]: 单次动力分析完成后提取的各楼层最大绝对加速度（含地面运动激励参数）。格式为浮点数列表，长度对应楼层数量。"""
     
     MaxRelativeAccel: list = []
-    """list[float]: 单次动力分析完成后提取的各楼层最大相对加速度（相对底部的自身加速度）。格式为浮点数列表，长度对应楼层数量。"""
-    
+    """list[float]: 单次动力分析完成后提取的各楼层最大相对加速度（相对底部的自身加速度）。格式为浮点数列表，长度对应楼层数量。"""    
+
+    MaxAbsVel: list = []
+    """list[float]: 单次动力分析完成后提取的各楼层最大绝对速度（模型单位/s）。
+    列表长度 = len(floor_nodes)，不含地面层。
+    """    
+
+    MaxRelativeVel: list = []
+    """list[float]: 单次动力分析完成后提取的各楼层最大相对速度（相对地面的速度，模型单位/s）。
+    列表长度 = len(floor_nodes)，不含地面层。
+    """
+
     ResDrift: float = 0.0
     """float: 单次动力分析结束后整个结构（通常为全楼层中出现的最大值）的残余层间位移角。"""
     
@@ -98,6 +109,8 @@ class GeneralModelWrapper:
         self.MaxDrift = []
         self.MaxAbsAccel = []
         self.MaxRelativeAccel = []
+        self.MaxAbsVel = []
+        self.MaxRelativeVel = []
         self.ResDrift = []
 
         # 自动计算基本周期
@@ -206,22 +219,39 @@ class GeneralModelWrapper:
             ops.rayleigh(alpha_m, 0.0, beta_k_init, 0.0)
         dt_gm, nPts = ReadRecord(record_file, temp_eq_file.as_posix())
 
+        # 预计算地面速度时程（积分地面加速度），供绝对速度 Recorder 的 -timeSeries 引用
+        _eq_accel_arr = np.array(open(temp_eq_file).read().split(), dtype=float) * (scale_factor * self._g_factor)
+        _eq_vel_arr   = np.cumsum(_eq_accel_arr) * dt_gm
+        vel_ts_file   = _tmp_dir / "ground_vel.dat"
+        np.savetxt(vel_ts_file, _eq_vel_arr, fmt='%.9e')
+
         ana_dt = dt_gm if delta_t == 'AsInRecord' else float(delta_t)
-        disp_file = _tmp_dir / "disp.out"
-        accel_file = _tmp_dir / "accel.out"
-        
+
+        # 4. 定义地震动激励及速度时程（需在 Recorder 引用前定义）
+        ops.timeSeries("Path", 111, "-dt", dt_gm, "-filePath", temp_eq_file.as_posix(), "-factor", scale_factor * self._g_factor)
+        ops.timeSeries("Path", 112, "-dt", dt_gm, "-filePath", vel_ts_file.as_posix(), "-factor", 1.0)
+        ops.pattern("UniformExcitation", 111, self._dof, "-accel", 111)
+
+        disp_file          = _tmp_dir / "disp.out"
+        abs_accel_env_file = _tmp_dir / "abs_accel_env.out"
+        rel_accel_env_file = _tmp_dir / "rel_accel_env.out"
+        abs_vel_env_file   = _tmp_dir / "abs_vel_env.out"
+        rel_vel_env_file   = _tmp_dir / "rel_vel_env.out"
+
+        # 位移时程（供层间漂移和残余漂移后处理）
         ops.recorder("Node", "-file", disp_file.as_posix(), "-time", "-node", *self._floor_nodes, "-dof", self._dof, "disp")
-        ops.recorder("Node", "-file", accel_file.as_posix(), "-time", "-node", *self._floor_nodes, "-dof", self._dof, "accel")
-        
+        # EnvelopeNode 直接输出 min/max/absMax 三行，避免保存完整加速度/速度时程
+        # accel + timeSeries 111（地面加速度）= 绝对加速度；不加 timeSeries = 相对加速度
+        # vel   + timeSeries 112（地面速度）  = 绝对速度；  不加 timeSeries = 相对速度
+        ops.recorder("EnvelopeNode", "-file", abs_accel_env_file.as_posix(), "-timeSeries", 111, "-node", *self._floor_nodes, "-dof", self._dof, "accel")
+        ops.recorder("EnvelopeNode", "-file", rel_accel_env_file.as_posix(),                     "-node", *self._floor_nodes, "-dof", self._dof, "accel")
+        ops.recorder("EnvelopeNode", "-file", abs_vel_env_file.as_posix(),   "-timeSeries", 112, "-node", *self._floor_nodes, "-dof", self._dof, "vel")
+        ops.recorder("EnvelopeNode", "-file", rel_vel_env_file.as_posix(),                       "-node", *self._floor_nodes, "-dof", self._dof, "vel")
+
         base_disp_file = None
         if self._base_nodes:
             base_disp_file = _tmp_dir / "basedisp.out"
             ops.recorder("Node", "-file", base_disp_file.as_posix(), "-time", "-node", *self._base_nodes, "-dof", self._dof, "disp")
-        
-        # 4. 定义地震动激励
-        # scale_factor 是谱加速度 SA 倍数，原 EQ 记录单位为 g。故输入乘子 = scale_factor * g_factor
-        ops.timeSeries("Path", 111, "-dt", dt_gm, "-filePath", temp_eq_file.as_posix(), "-factor", scale_factor * self._g_factor)
-        ops.pattern("UniformExcitation", 111, self._dof, "-accel", 111)
         
         # 5. 瞬态分析设置 (可根据需要替换)
         ops.system("BandGeneral")
@@ -336,73 +366,165 @@ class GeneralModelWrapper:
         # Wipe 会自动 flush file recorder，以确保可以读取
         ops.wipe()
         
-        # 6. 后处理：计算层间漂移、绝对加速度
-        self._post_process(disp_file, accel_file, base_disp_file, temp_eq_file, dt_gm, scale_factor * self._g_factor)
+        # 6. 后处理：从包络文件读取 EDP 最大值，从位移时程中计算漂移和残余漂移
+        self._post_process(disp_file, abs_accel_env_file, rel_accel_env_file, abs_vel_env_file, rel_vel_env_file, base_disp_file)
             
         return finished, tCurrent, totalTime
 
-    def _remove_file(self, filepath: Path):
-        try:
-            if filepath.exists():
-                filepath.unlink()
-        except:
-            pass
+    def DynamicAnalysis_Sa(self, record_file: str, target_Sa: float, ifprint: bool = False, delta_t='AsInRecord', animate: bool = False, show_progress: bool = False, **kwargs):
+        """
+        以目标谱加速度 Sa(T₁, ζ)（单位 g）为输入做动力时程分析。
+        内部用 eqsig 计算原始记录在结构基本周期 T₁ 处的谱加速度，
+        进而推算所需缩放系数后调用 :meth:`DynamicAnalysis`。
+        响应谱计算使用 ``self.DampingRatio`` 作为阻尼比。
 
-    def _post_process(self, disp_file, accel_file, base_disp_file, temp_eq_file, dt_gm, adjusted_hz_factor):
+        Parameters
+        ----------
+        record_file : str
+            地震动记录文件路径（与 :meth:`DynamicAnalysis` 相同）。
+        target_Sa : float
+            目标谱加速度，单位 g。
+        ifprint : bool
+            是否打印分析过程信息。
+        delta_t : str or float
+            时间步长。
+        animate : bool
+            是否在分析结束后自动播放 openseespy 动态位移变形动画。默认 False。
+        show_progress : bool
+            是否打印控制台进度条信息。默认 False。
+        **kwargs
+            其余参数透传给 opsvis.anim_defo()。
+
+        Returns
+        -------
+        Tuple[bool, float, float]
+            与 :meth:`DynamicAnalysis` 返回值相同：
+            (分析是否成功, 当前时间, 总时间)。
+
+        Raises
+        ------
+        ValueError
+            若 T₁ ≤ 0 或记录的 Sa(T₁) ≈ 0，无法计算缩放系数。
+        """
+
+        if self.T1 <= 0.0:
+            raise ValueError(
+                f"结构基本周期 T1={self.T1:.4f} s 无效，无法计算 Sa(T1)。"
+                "请检查模型质量矩阵或手动设置 wrapper_model.T1。"
+            )
+
+        # ── 读取地震动，获取 dt 及加速度序列（g） ──────────────────────────
+        p = Path(record_file)
+        _sa_tmp_dir = self.TmpDir / "sa_calc"
+        _sa_tmp_dir.mkdir(parents=True, exist_ok=True)
+        tmp_path = (_sa_tmp_dir / ('temp_' + p.name + '.dat')).as_posix()
+        dt_gm, _ = ReadRecord(record_file, tmp_path)
+        if dt_gm is None:
+            raise FileNotFoundError(f"无法读取地震动记录: {record_file}")
+        with open(tmp_path, 'r') as f:
+            accel_g = np.array(f.read().split(), dtype=float)
+
+        # ── 用 eqsig 计算原始记录在 T1 处的 Sa（g） ─────────────────────
+        record = eqsig.single.AccSignal(accel_g * 9.8, dt_gm)
+        record.generate_response_spectrum(response_times=np.array([self.T1]), xi=self.DampingRatio)
+        Sa_record = record.s_a[0] / 9.8
+
+        if Sa_record < 1.0e-10:
+            raise ValueError(
+                f"记录在 T1={self.T1:.3f}s 处的 Sa 接近于零 ({Sa_record:.3e} g)，"
+                "无法确定缩放系数。请检查记录文件或周期设置。"
+            )
+
+        scale_factor = target_Sa / Sa_record
+
+        print(f"  T1 = {self.T1:.3f} s | "
+              f"Sa(T1, record) = {Sa_record:.4f} g | "
+              f"target Sa = {target_Sa:.4f} g | "
+              f"scale_factor = {scale_factor:.4f}")
+
+        return self.DynamicAnalysis(
+            record_file=record_file,
+            scale_factor=scale_factor,
+            ifprint=ifprint,
+            delta_t=delta_t,
+            animate=animate,
+            show_progress=show_progress,
+            **kwargs,
+        )
+
+    def _post_process(self, disp_file, abs_accel_env_file, rel_accel_env_file, abs_vel_env_file, rel_vel_env_file, base_disp_file):
+        """从 EnvelopeNode 文件直接读取加速度/速度最大值；从位移时程中计算最大层间漂移和残余漂移。"""
+        n = len(self._floor_nodes)
+        zeros = [0.0] * n
+
+        def _read_env_absmax(path):
+            """读取 EnvelopeNode 输出文件的 absMax 行（第3行），返回浮点列表；失败则返回 None。"""
+            try:
+                data = np.loadtxt(path)
+                arr  = np.atleast_2d(data)  # 统一转为 2D
+                if arr.shape[0] == 3:       # 标准格式：3行(min/max/absMax) × n_nodes列
+                    return arr[2, :].tolist()
+            except Exception:
+                pass
+            return None
+
+        abs_accel = _read_env_absmax(abs_accel_env_file)
+        rel_accel = _read_env_absmax(rel_accel_env_file)
+        abs_vel   = _read_env_absmax(abs_vel_env_file)
+        rel_vel   = _read_env_absmax(rel_vel_env_file)
+
+        self.MaxAbsAccel      = abs_accel if abs_accel is not None else zeros[:]
+        self.MaxRelativeAccel = rel_accel if rel_accel is not None else zeros[:]
+        self.MaxAbsVel        = abs_vel   if abs_vel   is not None else [1e-6] * n
+        self.MaxRelativeVel   = rel_vel   if rel_vel   is not None else [1e-6] * n
+
+        # ── 位移时程：最大层间漂移 + 残余漂移 ──────────────────────────────
         try:
             disp_data = np.loadtxt(disp_file)
-            accel_data = np.loadtxt(accel_file)
         except Exception:
-            # 文件缺失或为空(例如第一步就没收敛)
-            self.MaxDrift = [0.0] * len(self._floor_nodes)
-            self.MaxRelativeAccel = [0.0] * len(self._floor_nodes)
-            self.MaxAbsAccel = [0.0] * len(self._floor_nodes)
+            self.MaxDrift = zeros[:]
             self.ResDrift = 0.0
             return
 
-        if len(disp_data) == 0:
+        if disp_data.size == 0:
+            self.MaxDrift = zeros[:]
+            self.ResDrift = 0.0
             return
 
         if disp_data.ndim == 1:
             disp_data = disp_data.reshape(1, -1)
-            accel_data = accel_data.reshape(1, -1)
 
         Times = disp_data[:, 0]
         Disps = disp_data[:, 1:]
-        RelAccels = accel_data[:, 1:]
-        
-        # 提取基底位移(如果有多节点则求均值)
+
         BaseDisps = np.zeros(len(Times))
         if base_disp_file and base_disp_file.exists():
             try:
                 base_data = np.loadtxt(base_disp_file)
-                if base_data.ndim == 1: base_data = base_data.reshape(1, -1)
-                BaseDisps = np.mean(base_data[:, 1:], axis=1) if base_data.shape[1] > 1 else np.zeros(len(Times))
-            except:
+                if base_data.ndim == 1:
+                    base_data = base_data.reshape(1, -1)
+                if base_data.shape[1] > 1:
+                    BaseDisps = np.mean(base_data[:, 1:], axis=1)
+            except Exception:
                 pass
-                
-        num_floors = Disps.shape[1]
-        num_steps = Disps.shape[0]
+
+        num_floors  = Disps.shape[1]
+        num_steps   = Disps.shape[0]
         FloorDrifts = np.zeros((num_steps, num_floors))
-        
+
         for i in range(num_floors):
-            lower_disp = BaseDisps if i == 0 else Disps[:, i-1]
+            lower_disp = BaseDisps if i == 0 else Disps[:, i - 1]
             FloorDrifts[:, i] = (Disps[:, i] - lower_disp) / self._story_heights[i]
-            
+
         self.MaxDrift = np.max(np.abs(FloorDrifts), axis=0).tolist()
-        self.ResDrift = float(np.max(np.abs(FloorDrifts[-1, :]))) if FloorDrifts.shape[0] > 0 else 0.0
-        self.MaxRelativeAccel = np.max(np.abs(RelAccels), axis=0).tolist()
-        
-        # 计算绝对加速度: 需将 ground motion 插值到当前的时程步中
-        try:
-            with open(temp_eq_file, 'r') as f:
-                eq_accel = np.array(f.read().split(), dtype=float) * adjusted_hz_factor
-            eq_times = np.arange(len(eq_accel)) * dt_gm
-            ag = np.interp(Times, eq_times, eq_accel, left=0.0, right=0.0)
-            AbsAccels = RelAccels + ag.reshape(-1, 1)
-            self.MaxAbsAccel = np.max(np.abs(AbsAccels), axis=0).tolist()
-        except:
-            self.MaxAbsAccel = self.MaxRelativeAccel
+
+        # 残余漂移：取最后几秒漂移时程的均值，减少末尾振动噪声的影响
+        if len(Times) > 1:
+            last_seconds = max(5.0, 0.1 * float(Times[-1] - Times[0]))
+            mask = Times >= (float(Times[-1]) - last_seconds)
+        else:
+            mask = np.ones(len(Times), dtype=bool)
+        self.ResDrift = float(np.max(np.abs(np.mean(FloorDrifts[mask, :], axis=0)))) if np.any(mask) else 0.0
 
     def StaticPushover(self, maxU: List[float] = [0.10, -0.10, 0.0], dU: float = 0.001, CFloor='roof', ifprint: bool = True, lateral_load_pattern_func: Optional[Callable] = None, animate: bool = False, **kwargs):
         """

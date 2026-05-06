@@ -1,8 +1,5 @@
 ########################################################
-# Design strength based on CN code
-# 
-# Dependancy: 
-# -
+# 基于中国规范的设计地震力计算
 ########################################################
 
 def Alpha_CNcode(T,Tg,alphaMax,kesi=0.05):
@@ -29,7 +26,7 @@ def Alpha_CNcode(T,Tg,alphaMax,kesi=0.05):
     return alpha
 
 
-# Tg
+# 特征周期 Tg
 def Tg_CNcode(EQgroup,SiteClass):
 
     matrix = {
@@ -45,8 +42,8 @@ def Tg_CNcode(EQgroup,SiteClass):
 
     return Tg
 
-# alphaMax
-# EQlevel - 'minor', 'medium', 'major'
+# 水平地震影响系数最大值 alphaMax
+# EQlevel   - 'minor'（多遇）, 'medium'（设计）, 'major'（罕遇）
 # SeismicDesignLevel - '6', '7', '7.5', '8', '8.5', '9'
 def alphaMax_CNcode(EQlevel,SeismicDesignLevel):
     matrix = {
@@ -60,7 +57,7 @@ def alphaMax_CNcode(EQlevel,SeismicDesignLevel):
         alphaMax = None
     return alphaMax
 
-# convert Chinese seismic design level to Hazus seismic design level
+# 将中国抗震设防等级转换为 Hazus 抗震设防等级
 def Concert_CN2Hazus_SeismicDesignLevel(SDL_CN: str):
     alphaMax = alphaMax_CNcode('medium',SDL_CN)
     if alphaMax > (0.4+0.2)/2:

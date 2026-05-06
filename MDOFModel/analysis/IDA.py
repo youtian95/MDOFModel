@@ -27,6 +27,7 @@ class IDAModelProtocol(Protocol):
     MaxDrift: list
     MaxAbsAccel: list
     MaxRelativeAccel: list
+    MaxAbsVel: list
     ResDrift: list
     T1: float
 
@@ -116,6 +117,7 @@ def IDA_1record(FEModel:IDAModelProtocol, IM_list:list, EQRecordfile:str, period
 
         data = {'IM':IM,'EQRecord':EQRecordfile,'MaxDrift':[FEModel.MaxDrift],
             'MaxAbsAccel':[FEModel.MaxAbsAccel],'MaxRelativeAccel':[FEModel.MaxRelativeAccel],
+            'MaxAbsVel':[getattr(FEModel, 'MaxAbsVel', [])],
             'ResDrift':FEModel.ResDrift,'Iffinish':bool(Iffinish), 'tCurrent':tCurrent, 'TotalTime':TotalTime}
         IDA_result=pd.concat([IDA_result,pd.DataFrame(data)], ignore_index=True)
 
@@ -298,6 +300,113 @@ def SimulateEDPGivenIM(IDA_result:pd.DataFrame, IM_list:list, N_Sim, betaM:float
     return SimEDP
 
 
+def _parse_ida_array(value):
+    if isinstance(value, str):
+        return np.fromstring(value.strip().strip('[]').replace(',', ' '), sep=' ')
+    return np.asarray(value, dtype=float)
+
+
+def _interp_ida_value(rows: pd.DataFrame, im_target: float, column: str):
+    im_values = rows['IM'].astype(float).to_numpy()
+    order = np.argsort(im_values)
+    rows = rows.iloc[order].reset_index(drop=True)
+    im_values = im_values[order]
+
+    exact = np.where(np.isclose(im_values, im_target))[0]
+    if len(exact) > 0:
+        return rows.iloc[exact[0]][column]
+
+    if im_target <= im_values[0]:
+        return rows.iloc[0][column]
+    if im_target >= im_values[-1]:
+        return rows.iloc[-1][column]
+
+    upper_idx = int(np.searchsorted(im_values, im_target, side='right'))
+    lower_idx = upper_idx - 1
+    im_low = im_values[lower_idx]
+    im_high = im_values[upper_idx]
+    weight = (im_target - im_low) / (im_high - im_low)
+
+    low = _parse_ida_array(rows.iloc[lower_idx][column])
+    high = _parse_ida_array(rows.iloc[upper_idx][column])
+    if low.shape != high.shape:
+        raise ValueError(
+            f"Cannot interpolate IDA column '{column}' because record "
+            f"{rows.iloc[lower_idx]['EQRecord']} has inconsistent array sizes."
+        )
+
+    return low + weight * (high - low)
+
+
+def interp_edp_from_ida(
+    ida_csv: Union[str, Path],
+    im_target: float,
+    num_stories: int,
+):
+    """
+    Extract EDP samples from IDA results at a target IM using per-record
+    linear interpolation between adjacent IM levels.
+    """
+    N = int(num_stories)
+    df = pd.read_csv(Path(ida_csv))
+    df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+    df['Iffinish'] = df['Iffinish'].astype(bool)
+    df = df.loc[df['Iffinish'], :].reset_index(drop=True)
+
+    if df.empty:
+        raise ValueError("No finished IDA records are available for EDP interpolation.")
+
+    for col in ('MaxDrift', 'MaxAbsAccel', 'MaxAbsVel', 'ResDrift'):
+        if col not in df.columns:
+            continue
+        for idx in df.index:
+            val = df.at[idx, col]
+            if isinstance(val, str):
+                arr = _parse_ida_array(val)
+                df.at[idx, col] = arr if arr.size != 1 else float(arr[0])
+
+    drift_rows = []
+    accel_rows = []
+    res_rows = []
+    vel_rows = []
+
+    for _, rows in df.groupby('EQRecord', sort=False):
+        if rows.empty:
+            continue
+
+        drift = np.asarray(_interp_ida_value(rows, im_target, 'MaxDrift'), dtype=float)[:N]
+        accel = np.asarray(_interp_ida_value(rows, im_target, 'MaxAbsAccel'), dtype=float)[:N]
+        res = _interp_ida_value(rows, im_target, 'ResDrift')
+        res = float(res) if not hasattr(res, '__len__') else float(np.max(res))
+
+        drift_rows.append(drift)
+        accel_rows.append(accel)
+        res_rows.append(res)
+
+        if 'MaxAbsVel' in rows.columns:
+            vel = np.asarray(_interp_ida_value(rows, im_target, 'MaxAbsVel'), dtype=float)
+            if len(vel) >= N + 1:
+                vel_rows.append(vel[:N + 1])
+            else:
+                vel_rows.append(np.concatenate([np.array([0.0]), vel[:N]]))
+
+    drift_mat = np.clip(np.array(drift_rows, dtype=float), 1e-8, None)
+
+    accel_raw = np.clip(np.array(accel_rows, dtype=float), 1e-8, None)
+    accel_g = accel_raw / 9800.0
+    ground = np.full((len(accel_g), 1), im_target * 0.4)
+    accel_mat = np.hstack([ground, accel_g])
+
+    res_arr = np.clip(np.array(res_rows, dtype=float), 1e-8, None)
+
+    if 'MaxAbsVel' in df.columns and vel_rows:
+        vel_mat = np.clip(np.array(vel_rows, dtype=float) / 1000.0, 1e-8, None)
+    else:
+        vel_mat = np.full((len(drift_mat), N + 1), 10.0)
+
+    return drift_mat, accel_mat, res_arr, vel_mat
+
+
 class IDAAnalysis():
     """用于执行 IDA 及其 EDP 模拟的高级接口封装类。"""
 
@@ -322,11 +431,11 @@ class IDAAnalysis():
         IM_list : list
             目标强度指标值（单位：g）。
         period : float, optional
-            用于计算谱加速度的基本周期。 If None, it will attempt to read the 'T1' or 'FundamentalPeriod' attribute from the FEModel.
+            用于计算谱加速度的基本周期。若为 None，将尝试从 FEModel 的 'T1' 或 'FundamentalPeriod' 属性读取。
         EQRecordfile_list : list, optional
             地震动记录文件路径列表。默认使用 FEMA P-695 远场地震动记录。
         DeltaT : str or float, optional
-            Time step for dynamic analyses.
+            动力分析的时间步长。
         NumPool : int, optional
             用于并行处理的进程数。
 
@@ -453,7 +562,7 @@ class IDAAnalysis():
         numpy.ndarray
             插值计算得到的结果。
         """
-        # x: scalar
+        # x: 标量
         # xp: list[float]
         # Yp: list[np.array]
 
@@ -524,7 +633,7 @@ class IDAAnalysis():
         else:
             D2_use = D2_total[num_var- lnEDPs_cov_rank:]
         
-        # Find the square root of D2_use and call is D_use. 
+        # 求 D2_use 的平方根，记为 D_use
         # 创建对角矩阵
         # 如果有任何负数，取为10**(-6)
         D2_use[D2_use<0] = 10**(-6)
@@ -538,7 +647,7 @@ class IDAAnalysis():
             
         U = U.T
 
-        # Create Lambda = D_use . L_use
+        # 创建 Lambda = D_use . L_use
         Lambda = L_use @ D_use
         # 创建最终的实现结果矩阵 
         Z = Lambda @ U + lnEDPs_mean @ np.ones((1,num_realization))
@@ -551,14 +660,14 @@ class IDAAnalysis():
         return W,R,ratio_mean,ratio_cov
 
     def FEMACodeSimulatingEDP(EDPs:np.array, betaM:float, num_realization):
-        """Estimate lognormal parameters from EDP data and 模拟 EDPs.
+        """根据 EDP 数据估计对数正态参数并模拟 EDP 样本。
 
         Parameters
         ----------
         EDPs : numpy.ndarray
             形状为 (N_sample, N_var) 的原始 EDP 数据样本。
         betaM : float
-            Epistemic uncertainty parameter.
+            认知不确定性参数。
         num_realization : int
             模拟实现的数量。
 
@@ -567,10 +676,10 @@ class IDAAnalysis():
         tuple
             (W, lnEDPs_mean, lnEDPs_cov, R, ratio_mean, ratio_cov).
         """
-        # Returns:
+        # 返回:
         #   W:  N_sim x N_var
-        # 
-        # Example usage:
+        #
+        # 使用示例:
         # W,lnEDPs_mean,R,ratio_mean,ratio_cov = FEMACodeSimulatingEDP(
         #     np.array([[1,2,4],[0.1,0.2,0.5],[8,9,10],[5,2,1]]),0.3,1000)
 

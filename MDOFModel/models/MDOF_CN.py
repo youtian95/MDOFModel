@@ -1,8 +1,5 @@
 ########################################################
-# Generate structural parameters according to basic building information based on CN standards.
-# 
-# Dependancy: 
-# - numpy, pandas
+# 基于中国规范，根据建筑基本信息生成结构参数。
 ########################################################
 
 from pathlib import Path
@@ -14,31 +11,31 @@ from ..utils import Alpha_CNcode as ACN
 
 class MDOF_CN:
 
-    # private
+    # 私有属性
     __FloorUnitMass = 1200  # 1200 kg/m2
     
-    # input parameters
+    # 输入参数
     NumOfStories = 0
     FloorArea = 0   # m2
-    StructuralType = 'UNKNOWN' # Hazus table 5.1
+    StructuralType = 'UNKNOWN' # Hazus 表 5.1
     SeismicDesignLevel = '7' # 6, 7, 7.5, 8, 8.5, 9 (g)
     EQGroup = '2' # 1, 2, 3
     SiteClass = '3'  # 1_0, 1_1, 2, 3, 4
     longitude = None
     latitude = None
 
-    # output parameters
-    # basic
+    # 输出参数
+    # 基本参数
     mass = 0    # kg
     K0 = 0      # N/m
     T1 = 0      # s
     N = 0
-    DampingRatio = 0.05 # damping ratio
+    DampingRatio = 0.05 # 阻尼比
     TypicalStoryHeight = 0 # (m)
-    # S# Spectral Acceleration at T1 with 475-year return period
+    # 中震 475 年重现期 T1 处的谱加速度 Sa(T1)
     Sa_T1 = 0 # g
-    # backbone curve
-    Vdi = []    # design strength (N)  (475-year return period)
+    # 骨架曲线参数
+    Vdi = []    # 设计强度（N）（475 年重现期）
     Vyi = []    # N
     betai = [] # overstrength ratio. Utlimate strength divided by yield strength
     etai = [] # hardening ratio. Post-yield stiffness divided by initial elastic stiffness
@@ -46,10 +43,10 @@ class MDOF_CN:
     # hysteretic parameters
     tao = []
     # ['Modified-Clough','Kinematic hardening','Pinching']
-    HystereticCurveType = 'Modified-Clough' 
+    HystereticCurveType = 'Modified-Clough'
 
-    # If the seismic design level or EQgroup is not provided, they will be set according to the city.
-    # If the site class is not provided, it will be set according to the location.
+    # 若未提供抗震设防等级或地震组别，将根据城市自动确定。
+    # 若未提供场地类别，将根据地理坐标自动确定。
     def __init__(self, NumOfStories, FloorArea, StructuralType, 
             SeismicDesignLevel = 'UNKNOWN', EQGroup = 'UNKNOWN', City='UNKNOWN', 
             SiteClass='UNKNOWN', longitude = None, latitude = None):
@@ -57,7 +54,7 @@ class MDOF_CN:
         self.NumOfStories = NumOfStories
         self.FloorArea = FloorArea
         self.__Read_StructuralType(StructuralType)
-        # design level
+        # 设防等级
         if not (SeismicDesignLevel == 'UNKNOWN'):
             self.SeismicDesignLevel = SeismicDesignLevel
         if not (EQGroup == 'UNKNOWN'):
@@ -65,7 +62,7 @@ class MDOF_CN:
         if (not (City == 'UNKNOWN')) and \
             ((SeismicDesignLevel == 'UNKNOWN') or (EQGroup == 'UNKNOWN')):
             self.__Set_DesignLevelbyCity(City)
-        # site class
+        # 场地类别
         self.longitude = longitude
         self.latitude = latitude
         if not (SiteClass == 'UNKNOWN'):
@@ -74,10 +71,10 @@ class MDOF_CN:
             if (longitude and latitude):
                 self.__Set_SiteClassbyLoc(longitude,latitude)
             
-        # story mass
+        # 层质量
         self.mass = self.__FloorUnitMass * self.FloorArea
 
-        # read hazus data
+        # 读取 Hazus 数据
         current_path = Path(__file__).resolve().parent.parent
         HazusDataTable5_5 = pd.read_csv(current_path/"./Resources/HazusData Table 5.5.csv",
             index_col='building type')
@@ -90,22 +87,22 @@ class MDOF_CN:
         HazusDataTable5_18 = pd.read_csv(current_path/"./Resources/HazusData Table 5.18.csv",
             index_col=0, header=[0,1])
         
-        # Concert_CN2Hazus_SeismicDesignLevel
+        # 将中国设防等级转换为 Hazus 设防等级
         SDL_Hazus = ACN.Concert_CN2Hazus_SeismicDesignLevel(self.SeismicDesignLevel)
 
-        # periods. According to Hazus Table 5.5
+        # 周期（参考 Hazus 表 5.5）
         T0 = HazusDataTable5_5['typical periods, Te (seconds)'][self.StructuralType]
         N0 = HazusDataTable5_1['typical stories'][self.StructuralType]
         self.T1 = self.N / N0 * T0
-        # According to CN code, if the building has more than 10 stories, the period is calculated as follows:
-        # [1] 中国建筑科学研究院, 同济大学, 中国建筑设计研究院, 等. 建筑结构荷载规范（GB 50009-2012） [S]. 2012.
+        # 根据中国规范，10 层及以上建筑周期按下式计算：
+        # 参考：中国建筑科学研究院等. 建筑结构荷载规范（GB 50009-2012）[S]. 2012.
         if self.N >= 10:
-            if self.StructuralType[0] == 'C': # concrete
+            if self.StructuralType[0] == 'C': # 混凝土
                 self.T1 = 0.075*self.N
-            elif self.StructuralType[0] == 'S': # steel
+            elif self.StructuralType[0] == 'S': # 钢结构
                 self.T1 = 0.125*self.N
 
-        # elastic stiffness
+        # 弹性层刚度
         UnitMassMat = np.zeros([self.N,self.N])
         if self.N == 1:
             lambda1 = 1
@@ -128,16 +125,17 @@ class MDOF_CN:
         elif self.StructuralType[0] == 'S': # steel
             self.DampingRatio = 0.05
         elif self.StructuralType[0] == 'W': # wood
+
             self.DampingRatio = 0.10
         elif self.StructuralType[0:2] == 'RM' or self.StructuralType[0:3] == 'URM': 
-            # reinforced mansory or unreinforced mansory
+            # 配筋砖石或无筋砖石
             self.DampingRatio = 0.10
         else:
             pass
 
-        # Tg
+        # 特征周期 Tg
         Tg = ACN.Tg_CNcode(self.EQGroup,self.SiteClass)
-        # alphaMax_medium
+        # 中震水平地震影响系数最大值
         alphaMax_medium = ACN.alphaMax_CNcode('medium',self.SeismicDesignLevel)
         alpha1_medium = ACN.Alpha_CNcode(self.T1,Tg,alphaMax_medium,self.DampingRatio)
         alphaMax_major = ACN.alphaMax_CNcode('major',self.SeismicDesignLevel)
@@ -146,12 +144,12 @@ class MDOF_CN:
         # Sa(T1)
         self.Sa_T1 = alpha1_medium
 
-        # Vyi, betai, etai
-        # Per GB 50011-2010
-        kesi_y = 0.4 # Table 5.5.4, GB 50011-2010
+        # Vyi, betai, etai参数计算
+        # 参考 GB 50011-2010
+        kesi_y = 0.4 # 表 5.5.4, GB 50011-2010
         SAy = 0.85*alpha1_major*kesi_y
         SDy = self.mass * SAy / self.K0
-        gamma = (alpha1_major*kesi_y)/alpha1_medium  # 'overstrength ratio, yield, gamma'
+        gamma = (alpha1_major*kesi_y)/alpha1_medium  # '超强系数，屈服, gamma'
         lambda_ = HazusDataTable5_5['overstrength ratio, ultimate, lambda'][self.StructuralType]
         SAu = lambda_ * SAy
         miu = HazusDataTable5_6[SDL_Hazus][self.StructuralType]
@@ -159,12 +157,12 @@ class MDOF_CN:
         ISDR_threshold = HazusDataTable5_9.loc[self.StructuralType,
             (SDL_Hazus,'Interstory Drift at Threshold of Damage State','Median','Complete')]
         kappa = HazusDataTable5_18.loc[self.StructuralType,(SDL_Hazus,'Moderate')]
-        # typical story height
+        # 典型层高
         Height_feet = HazusDataTable5_1['typical height to roof (feet)'][self.StructuralType]
         StoryHeight = Height_feet/N0*0.3048
         self.TypicalStoryHeight = StoryHeight
 
-        # Vyi, Vdi, betai, etai of other stories
+        # 各层 Vyi, Vdi, betai, etai
         self.Vyi = [0] * self.N
         self.Vdi = [0] * self.N
         self.betai = [0] * self.N

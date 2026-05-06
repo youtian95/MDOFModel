@@ -24,7 +24,9 @@ dependencies = [
     "openpyxl",
     "eqsig",
     "Opsvis",
-    "tqdm"
+    "tqdm",
+    "pelicun"
+    "normqtypact"
 ]
 
 [project.urls]

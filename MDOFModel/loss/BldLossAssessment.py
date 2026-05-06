@@ -1,10 +1,7 @@
 ########################################################
-# Perform building seismic loss assessment according to Hazus. Return the 
-# damage states, economic losses, repair time, loss of function, etc. given 
-# the EDP of buildings.
+# 基于 Hazus 方法对建筑进行地震损失评估。
 # 
-# Dependancy: 
-# - pandas, numpy
+# 在给定建筑 EDP 的条件下，返回不同的破坏状态、经济损失、修复时间和功能丧失时间等信息。
 ########################################################
 
 from pathlib import Path
@@ -22,50 +19,50 @@ class BldLossAssessment:
     # input parameters
     NumOfStories = 0
     FloorArea = 0   # m2
-    StructuralType = 'UNKNOWN' # Hazus table 5.1
-    SeismicDesignLevel = 'moderate-code' # 'high-code', 'moderate-code', 'low-code',
+    StructuralType = 'UNKNOWN' # Hazus 表 5.1
+    SeismicDesignLevel = 'moderate-code' # 'high-code', 'moderate-code', 'low-code'
     OccupancyClass = 'UNKNOWN'
 
-    ## Estimated results
-    # damage states
-    DS_Struct = ['UNKNOWN'] # None/ Slight/ Moderate/ Extensive/ Complete
+    ## 评估结果
+    # 破坏状态
+    DS_Struct = ['UNKNOWN'] # None/'Slight'/'Moderate'/'Extensive'/'Complete'
     DS_NonStruct_DriftSen = ['UNKNOWN']
     DS_NonStruct_AccelSen = ['UNKNOWN']
-    # repair cost
+    # 修复费用
     RepairCost_Total = ['UNKNOWN']
     RepairCost_Struct = ['UNKNOWN']
     RepairCost_NonStruct_DriftSen = ['UNKNOWN']
     RepairCost_NonStruct_AccelSen = ['UNKNOWN']
-    # repair time
+    # 修复时间
     RepairTime = ['UNKNOWN'] 
-    RecoveryTime = ['UNKNOWN'] # longer than repair time. It considers other factors apart from repairing components
+    RecoveryTime = ['UNKNOWN'] # 恢复时间，大于单纯修复时间，考虑了其他非结构因素
     FunctionLossTime = ['UNKNOWN']
 
-    ## parameters on resisual drift
-    Median_RIDR = 0.01  # irrepairable residual drift ratio. 0 means not to consider it
+    ## 残余位移角相关参数
+    Median_RIDR = 0.01  # 不可修复残余位移角阈值，为 0 时不考虑残余位移角对损失评估的影响
     Beta_RIDR = 0.3
 
-    ## Data from hazus
-    # IDR/Accel thresholds for structural/Nonstructural DS
+    ## Hazus 数据
+    # 结构构件 / 非结构构件的 IDR/加速度 阈值
     Median_IDR_Struct_DS = [0,0,0,0]
     Beta_IDR_Struct_DS = [0,0,0,0]
     Median_IDR_NonStruct_DS = [0,0,0,0]
     Beta_IDR_NonStruct_DS = [0,0,0,0]
-    Median_Accel_NonStruct_DS = [0,0,0,0]  # Unit: g
-    Beta_Accel_NonStruct_DS = [0,0,0,0] # Unit: g
-    # replacement cost
+    Median_Accel_NonStruct_DS = [0,0,0,0]  # 单位: g
+    Beta_Accel_NonStruct_DS = [0,0,0,0] # 单位: g
+    # 替换价值
     ReplacementCost_Total = 0 
-    StructureReplacementCost = 0  # including (1) structural, (2) drift-sens, and (3) accel-sens non-struct
-    ContentsValueFactorOfStructureValue = 1.0   # accel-sensitive non-structural components
-    # repair cost ratios
-    StructureRCRatio_DS = [0,0,0,0] # corresponding to 4 damage states
-    AccelSenNonstructRCRatio_DS = [0,0,0,0] # corresponding to 4 damage states
-    DriftSenNonstructRCRatio_DS = [0,0,0,0] # corresponding to 4 damage states
-    ContentsRCRatio_DS = [0,0,0,0] # corresponding to 4 accel-sensitive damage states
-    # repair time
-    RepairTime_DS = [0,0,0,0,0]  # corresponding to 5 damage states
-    RecoveryTime_DS = [0,0,0,0,0]  # corresponding to 5 damage states
-    FunctionLossMultipliers = [0,0,0,0,0]  # corresponding to 5 damage states
+    StructureReplacementCost = 0  # 包含：(1) 结构构件，(2) 位移敏感非结构构件，(3) 加速度敏感非结构构件
+    ContentsValueFactorOfStructureValue = 1.0   # 加速度敏感非结构构件
+    # 修复费用比例
+    StructureRCRatio_DS = [0,0,0,0] # 对应 4 个破坏状态
+    AccelSenNonstructRCRatio_DS = [0,0,0,0] # 对应 4 个破坏状态
+    DriftSenNonstructRCRatio_DS = [0,0,0,0] # 对应 4 个破坏状态
+    ContentsRCRatio_DS = [0,0,0,0] # 对应 4 个加速度敏感破坏状态
+    # 修复时间
+    RepairTime_DS = [0,0,0,0,0]  # 对应 5 个破坏状态
+    RecoveryTime_DS = [0,0,0,0,0]  # 对应 5 个破坏状态
+    FunctionLossMultipliers = [0,0,0,0,0]  # 对应 5 个破坏状态
 
     # preloaded data
     _HazusInventoryTable4_2 = None
@@ -86,10 +83,10 @@ class BldLossAssessment:
     @classmethod
     def LoadHazusData(cls):
         """
-        This method preloads the Hazus data, and avoid loading it multiple times when creating multiple instances.
+        预加载 Hazus 数据，避免创建多个实例时重复加载。
         """
         
-        current_dir = Path(__file__).resolve().parent
+        current_dir = Path(__file__).resolve().parent.parent
 
         cls._HazusInventoryTable4_2 = pd.read_csv(current_dir/"./Resources/HazusInventory Table 4-2.csv", index_col=0, header=0)
         cls._HazusInventoryTable6_2 = pd.read_csv(current_dir/"./Resources/HazusInventory Table 6-2.csv",index_col=0, header=1)
@@ -113,7 +110,7 @@ class BldLossAssessment:
  
     def __init__(self, NumOfStories, FloorArea, StructuralType, DesignLevel, OccupancyClass):
 
-        # if the data is not loaded, load it
+        # 若数据尚未加载，则加载
         if BldLossAssessment._HazusInventoryTable4_2 is None:
             self.LoadHazusData()
 
@@ -136,10 +133,10 @@ class BldLossAssessment:
         self.__Read_IDR_Accel_thresholds_DS()
 
     def LossAssessment(self,MaxDriftRatio,MaxAbsAccel, MaxRIDR = 'none'):
-        # Parameters:
-        # MaxDriftRatio - max IDR. List[] . It is a vector if there are multiple analyses.
-        # MaxAbsAccel - max AbsAccel (g). list[]. 
-        # MaxRIDR - max residual drift ratio. list[].
+        # 参数:
+        # MaxDriftRatio - 最大层间位移角，列表[]，多次分析时为向量。
+        # MaxAbsAccel   - 最大绝对加速度（g），列表[]。
+        # MaxRIDR       - 最大残余层间位移角，列表[]。
 
         if len(MaxDriftRatio)==0 or len(MaxAbsAccel)==0:
             return
@@ -242,7 +239,7 @@ class BldLossAssessment:
         
     def __Estimate_DamageState(self,MaxDriftRatio,MaxAbsAccel,MaxRIDR):
 
-        # normal distribution objects
+        # 正态分布对象
         nd_DS_Struct = []
         for a, b in zip(self.Median_IDR_Struct_DS,self.Beta_IDR_Struct_DS):
             nd_DS_Struct.append(sta.NormalDist(log(a),b))
@@ -298,7 +295,7 @@ class BldLossAssessment:
             i+=1
 
     def __Estimate_RepairCost(self):
-        # given Damage States
+        # 基于破坏状态计算修复费用
         self.RepairCost_Struct = [0]*len(self.DS_Struct)
         self.RepairCost_NonStruct_DriftSen = [0]*len(self.DS_Struct)
         self.RepairCost_NonStruct_AccelSen = [0]*len(self.DS_Struct)

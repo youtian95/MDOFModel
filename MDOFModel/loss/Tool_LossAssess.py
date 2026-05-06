@@ -1,19 +1,13 @@
 ########################################################
-# Estimate seismic losses.
-# Python tools for cmd. 
-# 
-# Usage:
-# 1. loss assessment based on a dynamic analysis
-#   --EQRecordFile <> --EQScaling <> --NumofStories <> --FloorArea <> --StructuralType <>
-#       --OccupancyClass <> --DesignLevel <> --OutputDir <> --SelfCenteringEnhancingFactor <>
-# 
-# 2. Simulate EDP given a IM based on IDA results.
-#   --IM_list <0.1 0.2 0.3 ...> --N_Sim <100> --IDA_result <> --betaM <>
-#       --OutputDir <> --NumofStories <> --FloorArea <> --StructuralType <>
-#       --OccupancyClass <> --DesignLevel <>
-# 
-# Dependancy: 
-# - pandas, numpy, openseespy
+# 地震损失评估工具（命令行工具）。
+#
+# 用法：
+# 1. 基于动力分析的损失评估
+#   --EQRecordFile <> --EQScaling <> --NumofStories <> --FloorArea <> --StructuralType <> --OccupancyClass <> --DesignLevel <> --OutputDir <> --SelfCenteringEnhancingFactor <>
+#
+# 2. 基于 IDA 结果，在指定 IM 下模拟 EDP。
+#   --IM_list <0.1 0.2 0.3 ...> --N_Sim <100> --IDA_result <> --betaM <> --OutputDir <> --NumofStories <> --FloorArea <> --StructuralType <> --OccupancyClass <> --DesignLevel <>
+
 ########################################################
 
 import argparse
@@ -29,9 +23,36 @@ from . import BldLossAssessment as bl
 from ..analysis import IDA
 from ..utils import Alpha_CNcode as ACN
 
-def DynamicAnalysis_1Sim(NumofStories,FloorArea,StructuralType,OccupancyClass,
-    DesignInfo,EQRecordFile,EQScaling,OutputDir,SelfCenteringEnhancingFactor):
+def DynamicAnalysis_1Sim(NumofStories, FloorArea, StructuralType, OccupancyClass, DesignInfo, EQRecordFile, EQScaling, OutputDir, SelfCenteringEnhancingFactor):
+    """
+    单次动力时程分析 + Hazus 损失评估，并将结果保存为 CSV 文件。
 
+    参数
+    ----
+    NumofStories : int
+        楼层数。
+    FloorArea : float
+        楼层面积（m²）。
+    StructuralType : str
+        结构类型，如 'S1'、'C1M' 等（对应 Hazus 表 5.1）。
+    OccupancyClass : str
+        建筑使用类别，如 'RES1'、'COM4' 等（对应 Hazus 清单表）。
+    DesignInfo : dict
+        设计信息字典，包含以下键：
+          'Code'               : 设计规范，'Hazus' 或 'CN'
+          'SeismicDesignLevel' : 抗震设防等级
+          'EQgroup'            : 地震分组（Code='CN' 时使用）
+          'SiteClass'          : 场地类别（Code='CN' 时使用）
+    EQRecordFile : str
+        地震动记录文件路径（不含扩展名）。
+    EQScaling : float
+        地震动缩放系数。
+    OutputDir : str
+        结果输出目录，CSV 文件将写入该目录。
+    SelfCenteringEnhancingFactor : float
+        自复位增强系数（0~1）。
+    """
+    # ── 生成结构参数 ──────────────────────────────────────────────────────────
     if DesignInfo['Code'] == 'Hazus':
         bld = mlu.MDOF_LU(NumofStories, FloorArea, StructuralType, 
                           SeismicDesignLevel=DesignInfo['SeismicDesignLevel'])
@@ -43,23 +64,26 @@ def DynamicAnalysis_1Sim(NumofStories,FloorArea,StructuralType,OccupancyClass,
     else:
         print('ERROR: wrong DesignInfo')
         return
-    # bld.OutputStructuralParameters('structural parameters')
 
+    # ── 建立 MDOF 有限元模型并执行动力分析 ───────────────────────────────────
     fe = mops.MDOFOpenSees(NumofStories, [bld.mass]*bld.N, [bld.K0]*bld.N, bld.DampingRatio,
         bld.HystereticCurveType, bld.Vyi, bld.betai, bld.etai, bld.DeltaCi, bld.tao)
     fe.SelfCenteringEnhancingFactor = SelfCenteringEnhancingFactor
     fe.DynamicAnalysis(EQRecordFile, EQScaling)
-    # fe.PlotForceDriftHistory(1)
 
+    # ── 执行 Hazus 损失评估 ───────────────────────────────────────────────────
+    # 若为中国规范，将抗震设防等级转换为对应的 Hazus 等级
     DesignLevel = DesignInfo['SeismicDesignLevel']
     if DesignInfo['Code'] == 'CN':
         DesignLevel = ACN.Concert_CN2Hazus_SeismicDesignLevel(DesignInfo['SeismicDesignLevel'])
-    blo = bl.BldLossAssessment(NumofStories, FloorArea,StructuralType,DesignLevel,OccupancyClass)
-    blo.LossAssessment([fe.MaxDrift.max()],[fe.MaxAbsAccel.max()/9.8])  
+    blo = bl.BldLossAssessment(NumofStories, FloorArea, StructuralType, DesignLevel, OccupancyClass)
+    # MaxAbsAccel 单位为 mm/s²，除以 9800 换算为 g
+    blo.LossAssessment([fe.MaxDrift.max()], [fe.MaxAbsAccel.max() / 9800.0])  
 
+    # ── 保存结果 ──────────────────────────────────────────────────────────────
     data = {
-        'DS_Struct': blo.DS_Struct, 
-        'DS_NonStruct_DriftSen':blo.DS_NonStruct_DriftSen,
+        'DS_Struct': blo.DS_Struct,
+        'DS_NonStruct_DriftSen': blo.DS_NonStruct_DriftSen,
         'DS_NonStruct_AccelSen': blo.DS_NonStruct_AccelSen,
         'RepairCost_Total': blo.RepairCost_Total,
         'RepairCost_Struct': blo.RepairCost_Struct,
@@ -67,40 +91,82 @@ def DynamicAnalysis_1Sim(NumofStories,FloorArea,StructuralType,OccupancyClass,
         'RepairCost_NonStruct_AccelSen': blo.RepairCost_NonStruct_AccelSen,
         'RepairTime': blo.RepairTime,
         'RecoveryTime': blo.RecoveryTime,
-        'FunctionLossTime': blo.FunctionLossTime
+        'FunctionLossTime': blo.FunctionLossTime,
     }
     df = pd.DataFrame(data)
-    df.to_csv(Path(OutputDir).joinpath('BldLoss.csv'),index=0)
+    df.to_csv(Path(OutputDir).joinpath('BldLoss.csv'), index=False)
 
-def Simulate_losses_given_IM_basedon_IDA(IDA_result,IM_list,N_Sim,betaM,OutputDir,
-    NumofStories,FloorArea,StructuralType,DesignInfo,OccupancyClass) -> tuple[pd.DataFrame,pd.DataFrame]:
+def Simulate_losses_given_IM_basedon_IDA(IDA_result, IM_list, N_Sim, betaM, OutputDir, NumofStories, FloorArea, StructuralType, DesignInfo, OccupancyClass) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    基于 IDA 结果，在指定 IM 水平下模拟 EDP 并执行 Hazus 损失评估。
+
+    参数
+    ----
+    IDA_result : str
+        IDA 结果 CSV 文件路径。
+    IM_list : list[float]
+        目标强震危险度指标（IM）列表，单位为 g。
+    N_Sim : list[int] | int
+        每个 IM 级别的模拟次数。若为单元素列表，则取该元素值。
+    betaM : float
+        认知不确定参数（对数标准差）。
+    OutputDir : str
+        结果输出目录。如果不为 None，将保存 SimEDP.csv 与 BldLoss.csv。
+    NumofStories : int
+        楼层数。
+    FloorArea : float
+        楼层面积，单位为 m²。
+    StructuralType : str
+        结构类型，如 Hazus 表 5.1 中的 'S1'、'C1M' 等。
+    DesignInfo : dict
+        设计信息字典，包含 'Code'、'SeismicDesignLevel' 等键。
+    OccupancyClass : str
+        建筑使用类别，如 'RES1'、'COM4' 等。
+
+    返回
+    ----
+    tuple[pd.DataFrame, pd.DataFrame]
+        返回 (SimEDP, BldLoss) 数据帧，分别为模拟的 EDP 结果和损失评估结果。
+    """
 
     IDA_result = pd.read_csv(Path(IDA_result))
     IDA_result['Iffinish'] = IDA_result['Iffinish'].astype(bool)
+    # 删除 CSV 读取时可能产生的匿名列
     IDA_result = IDA_result.loc[:, ~IDA_result.columns.str.contains('^Unnamed')]
-    IDA_result = IDA_result.loc[IDA_result['Iffinish']==1,:]  
-    for ind,row in IDA_result.iterrows():
-        for varname in ['MaxDrift','MaxAbsAccel','MaxRelativeAccel']:
-            if isinstance(row[varname],str):
-                IDA_result.at[ind,varname] = np.array(
-                    [float(val) for val in row[varname].replace('[','').replace(']','').split()])
+    # 仅保留分析成功完成的行
+    IDA_result = IDA_result.loc[IDA_result['Iffinish'] == 1, :]
+    # 将以字符串形式存储的数组列（MaxDrift / MaxAbsAccel 等）还原为 numpy 数组
+    for ind, row in IDA_result.iterrows():
+        for varname in ['MaxDrift', 'MaxAbsAccel', 'MaxRelativeAccel']:
+            if isinstance(row[varname], str):
+                IDA_result.at[ind, varname] = np.array(
+                    [float(val) for val in
+                     row[varname].replace('[', '').replace(']', '').replace(',', ' ').split()])
 
-    if len(N_Sim)==1:
+    # ── 在给定 IM 下模拟 EDP ─────────────────────────────────────────────────
+    if len(N_Sim) == 1:
         N_Sim = N_Sim[0]
-    SimEDP = IDA.SimulateEDPGivenIM(IDA_result,IM_list,N_Sim,betaM)
+    SimEDP = IDA.SimulateEDPGivenIM(IDA_result, IM_list, N_Sim, betaM)
     if OutputDir is not None:
-        SimEDP.to_csv(Path(OutputDir)/'SimEDP.csv')
+        SimEDP.to_csv(Path(OutputDir) / 'SimEDP.csv')
 
+    # ── 执行 Hazus 损失评估 ───────────────────────────────────────────────────
     DesignLevel = DesignInfo['SeismicDesignLevel']
     if DesignInfo['Code'] == 'CN':
         DesignLevel = ACN.Concert_CN2Hazus_SeismicDesignLevel(DesignInfo['SeismicDesignLevel'])
-    blo = bl.BldLossAssessment(NumofStories, FloorArea,StructuralType,DesignLevel,OccupancyClass)
-    blo.LossAssessment(SimEDP['MaxDrift'].tolist(),(SimEDP['MaxAbsAccel']/9.8).tolist(),
-        SimEDP['ResDrift'].tolist())  
+    blo = bl.BldLossAssessment(NumofStories, FloorArea, StructuralType, DesignLevel, OccupancyClass)
+    # MaxAbsAccel 单位为 mm/s²，除以 9800 换算为 g
+    blo.LossAssessment(
+        SimEDP['MaxDrift'].tolist(),
+        (SimEDP['MaxAbsAccel'] / 9800.0).tolist(),
+        SimEDP['ResDrift'].tolist(),
+    )
+
+    # ── 汇整结果并保存 ────────────────────────────────────────────────────────
     data = {
         'IM': SimEDP['IM'].tolist(),
-        'DS_Struct': blo.DS_Struct, 
-        'DS_NonStruct_DriftSen':blo.DS_NonStruct_DriftSen,
+        'DS_Struct': blo.DS_Struct,
+        'DS_NonStruct_DriftSen': blo.DS_NonStruct_DriftSen,
         'DS_NonStruct_AccelSen': blo.DS_NonStruct_AccelSen,
         'RepairCost_Total': blo.RepairCost_Total,
         'RepairCost_Struct': blo.RepairCost_Struct,
@@ -108,50 +174,73 @@ def Simulate_losses_given_IM_basedon_IDA(IDA_result,IM_list,N_Sim,betaM,OutputDi
         'RepairCost_NonStruct_AccelSen': blo.RepairCost_NonStruct_AccelSen,
         'RepairTime': blo.RepairTime,
         'RecoveryTime': blo.RecoveryTime,
-        'FunctionLossTime': blo.FunctionLossTime
+        'FunctionLossTime': blo.FunctionLossTime,
     }
     df = pd.DataFrame(data)
     if OutputDir is not None:
-        df.to_csv(Path(OutputDir)/'BldLoss.csv')
+        df.to_csv(Path(OutputDir) / 'BldLoss.csv')
 
     return SimEDP, df
 
 
 def main(args):
-    parser = argparse.ArgumentParser()
-    
-    # usage 1
-    parser.add_argument('--EQRecordFile')
-    parser.add_argument('--EQScaling',default = 1.0,type=float)
-    parser.add_argument('--SelfCenteringEnhancingFactor',
-        default = 0, type=float)
+    """命令行入口：解析参数后分发到用法 1 或用法 2。"""
+    parser = argparse.ArgumentParser(
+        description='地震损失评估工具（Hazus 方法）',
+    )
 
-    # usage 2   
-    parser.add_argument('--IM_list', nargs='+', type=float)
-    parser.add_argument('--N_Sim', nargs='+', type=int)
-    parser.add_argument('--IDA_result')
-    parser.add_argument('--betaM', type=float, default=0.0)
+    # ── 用法 1：单次动力分析 ──────────────────────────────────────────────────
+    parser.add_argument('--EQRecordFile',
+        help='地震动记录文件路径（不含扩展名）')
+    parser.add_argument('--EQScaling', default=1.0, type=float,
+        help='地震动缩放系数，默认 1.0')
+    parser.add_argument('--SelfCenteringEnhancingFactor', default=0, type=float,
+        help='自复位增强系数（0~1），默认 0')
 
-    # common arguments
-    parser.add_argument('--OutputDir',default = '')
-    parser.add_argument('--NumofStories',type=int)
-    parser.add_argument('--FloorArea',type=float)
-    parser.add_argument('--StructuralType')
-    parser.add_argument('--OccupancyClass')
-    parser.add_argument('--DesignInfo', type=dict)
+    # ── 用法 2：基于 IDA 结果模拟 EDP ─────────────────────────────────────────
+    parser.add_argument('--IM_list', nargs='+', type=float,
+        help='目标 IM 列表（单位 g），空格分隔')
+    parser.add_argument('--N_Sim', nargs='+', type=int,
+        help='每个 IM 级别的 EDP 模拟次数')
+    parser.add_argument('--IDA_result',
+        help='IDA 结果 CSV 文件路径')
+    parser.add_argument('--betaM', type=float, default=0.0,
+        help='认知不确定参数（对数标准差），默认 0.0')
+
+    # ── 公共参数 ──────────────────────────────────────────────────────────────
+    parser.add_argument('--OutputDir', default='',
+        help='结果输出目录')
+    parser.add_argument('--NumofStories', type=int,
+        help='楼层数')
+    parser.add_argument('--FloorArea', type=float,
+        help='楼层面积（m²）')
+    parser.add_argument('--StructuralType',
+        help='结构类型（Hazus 表 5.1），如 S1、C1M')
+    parser.add_argument('--OccupancyClass',
+        help='建筑使用类别，如 RES1、COM4')
+    parser.add_argument('--DesignInfo', type=dict,
+        help='设计信息字典')
 
     args = parser.parse_args(args)
 
-    if not args.EQRecordFile is None:
-        DynamicAnalysis_1Sim(args.NumofStories,args.FloorArea,args.StructuralType,
-            args.OccupancyClass,args.DesignInfo,args.EQRecordFile,
-            args.EQScaling,args.OutputDir,args.SelfCenteringEnhancingFactor)
-    elif not args.IDA_result is None:
-        Simulate_losses_given_IM_basedon_IDA(args.IDA_result,args.IM_list,args.N_Sim,
-            args.betaM,args.OutputDir,
-            args.NumofStories,args.FloorArea,args.StructuralType,args.DesignInfo,args.OccupancyClass)
+    # ── 根据传入参数选择执行路径 ──────────────────────────────────────────────
+    if args.EQRecordFile is not None:
+        # 用法 1：单次动力分析
+        DynamicAnalysis_1Sim(
+            args.NumofStories, args.FloorArea, args.StructuralType,
+            args.OccupancyClass, args.DesignInfo, args.EQRecordFile,
+            args.EQScaling, args.OutputDir, args.SelfCenteringEnhancingFactor,
+        )
+    elif args.IDA_result is not None:
+        # 用法 2：基于 IDA 结果模拟损失
+        Simulate_losses_given_IM_basedon_IDA(
+            args.IDA_result, args.IM_list, args.N_Sim,
+            args.betaM, args.OutputDir,
+            args.NumofStories, args.FloorArea, args.StructuralType,
+            args.DesignInfo, args.OccupancyClass,
+        )
     else:
-        print('ERROR: wrong arguments')
+        print('ERROR: 请提供 --EQRecordFile 或 --IDA_result 参数')
 
 # test function
 # Simulate_losses_given_IM_basedon_IDA('E:/CityResilienceAndResilientStructure/IDA_results/IDA_result_ReprBldID_2750.csv',

@@ -1,10 +1,7 @@
 ########################################################
-# Generate structural parameters according to basic building information.
-# 
-# Note: all buildings are considered as moderate seismic design level
-# 
-# Dependancy: 
-# - numpy, pandas
+# 根据建筑基本信息生成结构参数。
+#
+# 注意：所有建筑均默认采用中等水准抗震设计
 ########################################################
 
 from pathlib import Path
@@ -13,29 +10,29 @@ import pandas as pd
 
 class MDOF_LU:
 
-    # private
+    # 私有属性
     __FloorUnitMass = 1200  # 1200 kg/m2
-    __SeismicDesignLevel = 'moderate-code' # 'high-code', 'moderate-code', 'low-code',
+    __SeismicDesignLevel = 'moderate-code' # 'high-code', 'moderate-code', 'low-code'
     __EQDuration = 'Moderate'  # 'Short' 'Moderate' 'Long'
     
-    # input parameters
+    # 输入参数
     NumOfStories = 0
     FloorArea = 0   # m2
-    StructuralType = 'UNKNOWN' # Hazus table 5.1
+    StructuralType = 'UNKNOWN' # Hazus 表 5.1
 
-    # output parameters
-    # basic
+    # 输出参数
+    # 基本参数
     mass = 0    # kg
     K0 = 0      # N/m
     T1 = 0      # s
     # T2 = 0      # s
     N = 0
-    DampingRatio = 0.05 # damping ratio
+    DampingRatio = 0.05 # 阻尼比
     TypicalStoryHeight = 0 # (m)
-    # design strength coefficient
+    # 设计地震力系数
     Cs = 0
-    # backbone curve
-    Vdi = []    # design strength, N
+    # 骨架曲线参数
+    Vdi = []    # 设计强度，单位: N
     Vyi = []    # N
     betai = [] # overstrength ratio. Utlmate strength divided by yield strength
     etai = [] # hardening ratio. post-yield stiffness divided by initial elastic stiffness
@@ -54,7 +51,7 @@ class MDOF_LU:
             self.__SeismicDesignLevel = SeismicDesignLevel
         self.__Update_DesignLevel()
 
-        # read hazus data
+        # 读取 Hazus 数据
         current_directory = Path(__file__).resolve().parent.parent
         HazusDataTable5_5 = pd.read_csv(current_directory/"Resources/HazusData Table 5.5.csv",
             index_col='building type')
@@ -69,16 +66,16 @@ class MDOF_LU:
         HazusDataTable5_18 = pd.read_csv(current_directory/"Resources/HazusData Table 5.18.csv",
             index_col=0, header=[0,1])
 
-        # story mass
+        # 层质量
         self.mass = self.__FloorUnitMass * self.FloorArea
 
-        # periods
+        # 周期
         T0 = HazusDataTable5_5['typical periods, Te (seconds)'][self.StructuralType]
         N0 = HazusDataTable5_1['typical stories'][self.StructuralType]
         self.T1 = self.N / N0 * T0
         # self.T2 = self.T1/3.0
 
-        # elastic stiffness
+        # 弹性层刚度
         UnitMassMat = np.zeros([self.N,self.N])
         if self.N == 1:
             lambda1 = 1
@@ -95,15 +92,15 @@ class MDOF_LU:
             pass
         self.K0 = 4.0*3.14**2*self.mass/self.T1**2/lambda1
 
-        # damping ratio
-        if self.StructuralType[0] == 'C': # concrete
+        # 阻尼比
+        if self.StructuralType[0] == 'C': # 混凝土
             self.DampingRatio = 0.07
-        elif self.StructuralType[0] == 'S': # steel
+        elif self.StructuralType[0] == 'S': # 钢结构
             self.DampingRatio = 0.05
-        elif self.StructuralType[0] == 'W': # wood
+        elif self.StructuralType[0] == 'W': # 木结构
             self.DampingRatio = 0.10
         elif self.StructuralType[0:2] == 'RM' or self.StructuralType[0:3] == 'URM': 
-            # reinforced mansory or unreinforced mansory
+            # 配筋砖石或无筋砖石
             self.DampingRatio = 0.10
         else:
             pass

@@ -1,8 +1,5 @@
 ########################################################
-# Perform dynamic analysis using Openseespy. SI unit
-# 
-# Dependancy: 
-# - openseespy, pandas, numpy, matplotlib
+# 使用 OpenSeesPy 执行动力分析（SI 单位制）
 ########################################################
 
 from ctypes import Union
@@ -22,7 +19,7 @@ class MDOFOpenSees():
     UniqueRecorderPrefix = 'URP0_'
     __g = 9.8
 
-    # structrual parameters
+    # 结构参数
     NStories : int = 0
     m: list = []
     k: list = []
@@ -31,33 +28,34 @@ class MDOFOpenSees():
     HystereticParameters = ()
     SelfCenteringEnhancingFactor = 0.0 # 0-1
 
-    # output directory
+    # 输出目录
     outputdir = str(Path.cwd())
 
-    # pushover analysis results
-    # DriftHistory = {} # DriftHistory['time'] is the time list. DriftHistory[1] is the IDR list of 1st story
+    # 执行推覆分析的结果保存
+    # DriftHistory = {} # DriftHistory['time'] 为时间列表，DriftHistory[1] 为第1层层间位移角列表
     # ForceHistory = {} 
     NodeDispHistory = {} # NodeDispHistory['time'], NodeDispHistory[1-N]
 
-    # Dynamic analysis results
-    MaxDrift = np.array([]) # MaxDrift[0] is the 1st story
-    MaxAbsAccel = np.array([]) # MaxAbsAccel[0] is the ground
-    MaxRelativeAccel = np.array([]) # [0] is the ground
+    # 动力分析结果
+    MaxDrift = np.array([]) # MaxDrift[0] 为第1层
+    MaxAbsAccel = np.array([]) # MaxAbsAccel[0] 为地面
+    MaxRelativeAccel = np.array([]) # [0] 为地面
+    MaxAbsVel = np.array([]) # MaxAbsVel[0] 为地面（固定节点，值为 0）
     ResDrift = None
-    DriftHistory = {} # DriftHistory['time'] is the time list. DriftHistory[1] is the IDR list of 1st story
+    DriftHistory = {} # DriftHistory['time'] 为时间列表，DriftHistory[1] 为第1层层间位移角列表
     ForceHistory = {} 
-    NodeAbsAccelHistory = {} # NodeAbsAccelHistory[0] is the ground
+    NodeAbsAccelHistory = {} # NodeAbsAccelHistory[0] 为地面
     NodeRelativeAccelHistory = {}
 
 
     def __init__(self, NStories :int, m: list, k:list, DampingRatio:float,
         HystereticCurveType: str, *HystereticParameters):
-        # -NStories, number of stories
-        # -m, mass list for each floor, kg
-        # -k, elastic stiffness for each story, N/m
-        # -DampingRatio, scalar
-        # -HystereticCurveType, ['Elastic','Modified-Clough','Kinematic hardening','Pinching']
-        # -*HystereticParameters, variable parameters including (Vyi, betai, etai, DeltaCi, tao)
+        # -NStories: 层数
+        # -m: 各层质量列表，单位 kg
+        # -k: 各层弹性层刚度列表，单位 N/m
+        # -DampingRatio: 阻尼比
+        # -HystereticCurveType: ['Elastic','Modified-Clough','Kinematic hardening','Pinching']
+        # -*HystereticParameters: 可变参数，包括 (Vyi, betai, etai, DeltaCi, tao)
         # {
         #   -Vyi, yield shear force for each story, N
         #   -betai, overstrength ratio of ultimate strength to yield strength for each story
@@ -75,12 +73,12 @@ class MDOFOpenSees():
 
     def StaticPushover(self, maxU: list = [0.10,-0.10,0], dU = 0.001,
         CFloor = 'roof', ifprint: bool = True):
-        # Parameters:
-        # maxU - target disp (m).
-        # dU - Displacement increment (m)
-        # CFloor - controling floor. 
-        # 
-        # Returns:
+        # 参数:
+        # maxU   - 目标位移，单位 m
+        # dU     - 位移增量，单位 m
+        # CFloor - 控制层
+        #
+        # 返回值:
         # Iffinish, currentDisp
         
         if ifprint:
@@ -110,7 +108,7 @@ class MDOFOpenSees():
             str(Path(outputdir,self.UniqueRecorderPrefix+'NodeDispHistory.txt')),'-time',
             '-node', *list(range(1,self.NStories+1)), '-dof', 1, 'disp')
         
-        # Perform analysis        
+        # 执行分析        
         Tol = 1e-6
         maxNumIter = 100
         if isinstance(CFloor,str) & (CFloor == 'roof'):
@@ -136,7 +134,7 @@ class MDOFOpenSees():
                     np.sign(maxU[i]-currentDisp)*dU, numIter)
                 analysis('Static')
                 ok = analyze(1)
-                # if the analysis fails try initial tangent iteration
+                # 分析失败时跳出
                 if ok != 0:
                     break
                 currentDisp = nodeDisp(CFloor, 1)
@@ -153,13 +151,13 @@ class MDOFOpenSees():
         
     def DynamicAnalysis(self, EQRecordfile:str, GMScaling:float, ifprint: bool = True,
         DeltaT = 0.1):
-        # Parameters:
-        # -ifprint, true or false
-        # -EQRecordfile, earthquake record file which is in PEER format, such as 'H-E12140'
-        # -GMScaling, ground motion scaling factor
-        # -DeltaT, 'AsInRecord' or a float
-        # 
-        # Return:
+        # 参数:
+        # -ifprint:       是否打印过程信息
+        # -EQRecordfile:  PEER 格式地震动记录文件，例如 'H-E12140'
+        # -GMScaling:     地震动缩放系数
+        # -DeltaT:        'AsInRecord' 或浮点数
+        #
+        # 返回值:
         # Iffinish, tCurrent, TotalTime
 
         if ifprint:
@@ -167,12 +165,12 @@ class MDOFOpenSees():
 
         self.__BuildModel(ifprint)
 
-        # Permform the conversion from SMD record to OpenSees record
+        # 将 SMD 记录转换为 OpenSees 可读格式
         p = Path(EQRecordfile)
         dt, nPts = ReadRecord.ReadRecord(EQRecordfile, 
             (Path(p.parent, self.UniqueRecorderPrefix + p.name +'.dat')).as_posix())
 
-        # Uniform EXCITATION: acceleration input
+        # 均匀激励：加速度输入
         tsTag = 100
         EQfile = Path(p.parent,self.UniqueRecorderPrefix + p.name +'.dat')
         timeSeries('Path', tsTag, '-dt', dt, '-filePath', 
@@ -200,6 +198,9 @@ class MDOFOpenSees():
         recorder('EnvelopeNode', '-file', 
             str(Path(outputdir,self.UniqueRecorderPrefix+'MaxRelativeAccel.txt')),
             '-node', *list(range(self.NStories+1)), '-dof', 1, 'accel')
+        recorder('EnvelopeNode', '-file',
+            str(Path(outputdir,self.UniqueRecorderPrefix+'MaxAbsVel.txt')),
+            '-node', *list(range(self.NStories+1)), '-dof', 1, 'vel')
         recorder('Node', '-file', 
             str(Path(outputdir,self.UniqueRecorderPrefix+'NodeAbsAccelHistory.txt')),
             '-timeSeries', tsTag, '-time', 
@@ -209,14 +210,14 @@ class MDOFOpenSees():
             '-node', *list(range(self.NStories+1)), '-dof', 1, 'accel')
 
 
-        # dynamic analysis
+        # 动力分析
         Tol = 1e-8
         maxNumIter = 10
         DtAnalysis = dt if DeltaT== 'AsInRecord' else DeltaT # dt
         wipeAnalysis()
         constraints('Transformation')
         numberer('RCM')
-        # system('UmfPack') # only this works when using ExpressNewton algorithm.
+        # system('UmfPack') # 仅在使用 ExpressNewton 算法时有效
         system('BandGeneral')
 
         tCurrent = getTime()
@@ -297,14 +298,14 @@ class MDOFOpenSees():
 
 
     def __BuildModel(self, ifprint: bool):
-        # define building model
+        # 建立建筑模型
 
         wipe()			
         model('basic', '-ndm', 2, '-ndf', 3)
 
         storyLength = 1.0
 
-        # node
+        # 定义节点
         node(0, 0., 0.)
         fix(0, 1, 1, 1) 
         for i in range(self.NStories):
@@ -312,7 +313,7 @@ class MDOFOpenSees():
             mass(i+1, self.m[i], 0., 0.)
             fix(i+1, 0, 1, 1) 
         
-        # material
+        # 定义材料
         E = 1.0
         matTag = [i+1 for i in range(self.NStories)]
         A = [0] * self.NStories
@@ -443,6 +444,9 @@ class MDOFOpenSees():
             sep=r'\s+', header=None).loc[2,:].values
         self.MaxRelativeAccel = pd.read_table(
             str(Path(self.outputdir,self.UniqueRecorderPrefix+'MaxRelativeAccel.txt')), 
+            sep=r'\s+', header=None).loc[2,:].values
+        self.MaxAbsVel = pd.read_table(
+            str(Path(self.outputdir,self.UniqueRecorderPrefix+'MaxAbsVel.txt')),
             sep=r'\s+', header=None).loc[2,:].values
         
         df = pd.read_table(

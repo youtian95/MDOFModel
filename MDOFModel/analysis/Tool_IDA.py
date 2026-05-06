@@ -1,11 +1,5 @@
 ########################################################
-# Perform IDA and create a result file for a building
-# 
-# Usage:
-# 
-# 
-# Dependancy: 
-# - pandas, numpy, openseespy
+# 对建筑执行增量动力分析（IDA）并输出结果文件。
 ########################################################
 
 import argparse
@@ -23,20 +17,21 @@ def main_IDA(IM_list,NumofStories,FloorArea,StructuralType,
     EQMetaDataFile, OutputCSVFile, SelfCenteringEnhancingFactor = 0,
     DesignInfo = {'Code': 'CN', 'SeismicDesignLevel': 'UNKNOWN', 'EQgroup': 'UNKNOWN', 'SiteClass': 'UNKNOWN'}, NumPool = 1, TempDir = Path.cwd()/'temp', UseRelativeIM = False, WriteStructParaFile = None):
     '''
-    Perform Incremental Dynamic Analysis for a building
-    Parameters:
-        IM_list (list). List of intensity measures Sa(T1). unit: g. If UseRelativeIM is True, IM_list is the list of intensity measures relative to Sa(T1) with 475-year return period
-        NumofStories (int). Number of stories
-        FloorArea (float). Floor area. unit: m^2
-        StructuralType (str). Structural type
-        EQMetaDataFile (Path). Meta info file of earthquake input
-        OutputCSVFile (Path). Output file of IDA results
-        SelfCenteringEnhancingFactor (float). Self-centering enhancing factor
-        DesignInfo (dict). Design information
-        NumPool (int). Number of parallel processes
-        TempDir (Path). Temporary directory for OpenSees analysis
-        UseRelativeIM (bool). If True, IM_list is the list of intensity measures relative to Sa(T1) with 475-year return period
-        WriteStructParaFile (Path). File path to save the structural parameters. If None, the structural parameters will not be saved.
+    对建筑执行增量动力分析。
+    参数:
+        IM_list (list): 强度指标 Sa(T1) 列表，单位: g。
+            若 UseRelativeIM 为 True，则为相对于 475 年重现期 Sa(T1) 的强度指标列表。
+        NumofStories (int): 层数
+        FloorArea (float): 建筑面积，单位: m^2
+        StructuralType (str): 结构类型
+        EQMetaDataFile (Path): 地震动元数据文件路径
+        OutputCSVFile (Path): IDA 结果输出 CSV 文件路径
+        SelfCenteringEnhancingFactor (float): 自复位增强系数
+        DesignInfo (dict): 设计信息字典
+        NumPool (int): 并行进程数
+        TempDir (Path): OpenSees 分析临时文件目录
+        UseRelativeIM (bool): 为 True 时， IM_list 为相对于 475 年重现期 Sa(T1) 的强度指标
+        WriteStructParaFile (Path): 结构参数输出文件路径。为 None 时不输出。
     '''
 
     EQpath = Path(EQMetaDataFile)
@@ -65,7 +60,7 @@ def main_IDA(IM_list,NumofStories,FloorArea,StructuralType,
     fe.outputdir = TempDir
     fe.SelfCenteringEnhancingFactor = SelfCenteringEnhancingFactor
 
-    # If use relative IM, IM_list should be the original IM_list times Sa(T1) with 475-year return period
+    # 若使用相对强度指标，将 IM_list 乘以 475 年重现期的 Sa(T1)
     if UseRelativeIM:
         if DesignInfo['Code'] == 'Hazus':
             Sa_T1 = bld.Cs
@@ -99,7 +94,7 @@ def main(args):
     parser.add_argument('--UseRelativeIM',default = False, type=bool)
     args = parser.parse_args(args)
 
-    # Convert DesignInfo to a dictionary
+    # 将各个参数组装为 DesignInfo 字典
     DesignInfo = {
         'Code': args.DesignCode,
         'SeismicDesignLevel': args.DesignLevel,
@@ -117,7 +112,7 @@ def main(args):
         NumPool = args.NumPool, UseRelativeIM = args.UseRelativeIM)
 
 
-# test function
+# 测试函数
 # IM_list = [0.1,0.2,0.4,0.6,0.8,1.0,1.5,2.0]
 # NumofStories = 2
 # FloorArea = 5093.5
