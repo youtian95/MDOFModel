@@ -41,11 +41,19 @@ class PelicunLossAssessment:
             unit_list   = ['ea',           'ea'          ],
         )
 
-        # 3. 运行评估
+        # 3a. 直接传入 IDA CSV（推荐，自动提取 EDP）
         results = la.LossAssessment(
-            MaxDrift      = max_drift_list,     # rad，长度 = NumOfStories
-            MaxAccel      = max_accel_list,     # g，长度 = NumOfStories+1（含地面）
-            ResDrift      = float(res_drift),   # rad，最大残余层间位移角
+            IdaCsv        = 'IDA_results.csv',
+            ImLevel       = 0.6,            # 目标 Sa (g)
+            StructuralCmp = struct_cmp,
+        )
+
+        # 3b. 或手动传入 EDP 数组（兼容旧用法）
+        results = la.LossAssessment(
+            ImLevel       = 0.6,
+            MaxDrift      = max_drift_list,     # rad，shape (n_records, NumOfStories)
+            MaxAccel      = max_accel_list,     # g，shape (n_records, NumOfStories+1)
+            MaxResDrift   = res_drift_list,     # rad，shape (n_records,)
             StructuralCmp = struct_cmp,
         )
 
@@ -278,10 +286,11 @@ class PelicunLossAssessment:
     def LossAssessment(
         self,
         ImLevel: float,
-        MaxDrift,
-        MaxAccel,
+        MaxDrift=None,
+        MaxAccel=None,
         MaxFloorVel=None,
         MaxResDrift=None,
+        IdaCsv: 'str | Path | None' = None,
         StructuralCmp: 'pd.DataFrame | None' = None,
         ReplacementCost: float = None,
         ReplacementTime: float = None,
@@ -300,13 +309,20 @@ class PelicunLossAssessment:
 
         参数
         ----
-        MaxDrift : array-like, shape (n_records, NumOfStories)
+        ImLevel : float
+            输入的地震动水平（IM），用于标识当前评估的地震动强度。单位为 g。
+            当使用 ``IdaCsv`` 时，同时作为插值目标 Sa 值。
+        IdaCsv : str or Path, optional
+            IDA 结果 CSV 文件路径（由 ``MDOFModel.analysis.IDA`` 输出）。
+            提供后将自动插值提取 EDP，并覆盖下面四个 EDP 参数。
+            与直接传入 EDP 数组二选一。
+        MaxDrift : array-like, shape (n_records, NumOfStories), optional
             各条地震记录各层最大层间位移角（IDR），单位 rad。
-            可由 ``MDOFModel.analysis.IDA.interp_edp_from_ida`` 直接获取。
-        MaxAccel : array-like, shape (n_records, NumOfStories+1)
+            当 ``IdaCsv`` 已提供时可省略。
+        MaxAccel : array-like, shape (n_records, NumOfStories+1), optional
             各条地震记录各楼面最大绝对加速度，单位 g。
             第 0 列为地面层加速度，第 i 列为第 i 层楼面加速度。
-            可由 ``MDOFModel.analysis.IDA.interp_edp_from_ida`` 直接获取。
+            当 ``IdaCsv`` 已提供时可省略。
         StructuralCmp : pd.DataFrame, optional
             结构构件定义，由 ``make_struct_cmp()`` 生成。
             列名: cmp, loc, dir, uid, Theta_0, Theta_1, Family, Blocks, Units。
@@ -333,8 +349,6 @@ class PelicunLossAssessment:
             各条地震记录各楼面最大绝对速度，单位 m/s。
             第 0 列为地面层速度，第 i 列为第 i 层楼面速度。
             若为 None，则跳过楼层速度相关计算。
-        ImLevel : float
-            输入的地震动水平（IM），用于标识当前评估的地震动强度。单位为 g。
         OutputDir : str or Path, optional
             输出文件夹路径。若为 None，则默认使用当前工作目录下的 ``pelicun_output/``。
             文件夹在评估完成后保留，可用于调试检查。
@@ -353,6 +367,18 @@ class PelicunLossAssessment:
             raise ImportError(
                 "找不到 pelicun 包。请运行: pip install pelicun"
             ) from exc
+
+        # ── IdaCsv 快捷入口：直接从 IDA 结果 CSV 提取 EDP ─────────────────
+        if IdaCsv is not None:
+            from ..analysis import IDA as _IDA
+            MaxDrift, MaxAccel, MaxResDrift, MaxFloorVel = (
+                _IDA.interp_edp_from_ida(IdaCsv, ImLevel, self.NumOfStories)
+            )
+
+        if MaxDrift is None or MaxAccel is None:
+            raise ValueError(
+                "必须提供 MaxDrift 和 MaxAccel，或通过 IdaCsv 指定 IDA 结果文件。"
+            )
 
         N = self.NumOfStories
         max_drift = np.clip(np.asarray(MaxDrift, dtype=float), 1e-8, None)

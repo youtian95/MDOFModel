@@ -33,7 +33,6 @@ if examples_dir not in sys.path:
     sys.path.insert(0, examples_dir)
 
 from MDOFModel.loss.PelicunLossAssessment import PelicunLossAssessment
-from MDOFModel.analysis import IDA
 
 # ── 模型参数 ─────────────────────────────────────────────────────────────────
 NUM_OF_STORIES  = 6
@@ -51,7 +50,7 @@ IDA_CSV = str(
 )
 
 # ── 目标 Sa (g) ───────────────────────────────────────────────────────────────
-IM_TARGET = 0.3     # g
+IM_TARGET = 0.6     # g
 
 # ── 结构构件定义 ──────────────────────────────────────────────────────────────
 # 每层 8 个 SMF 节点（B.10.41.001a）
@@ -91,25 +90,16 @@ if __name__ == '__main__':
         IrreparableLogStd   = 0.3,
     )
 
-    # ── Step 2：从 IDA 结果提取目标 IM 水平下各条地震波的 EDP 样本 ───────────
-    drift_mat, accel_mat, res_arr, vel_mat = IDA.interp_edp_from_ida(
-        IDA_CSV, IM_TARGET, NUM_OF_STORIES,
-    )
-    print(f'  提取 EDP 样本数 : {len(drift_mat)}')
-    print(f'  各层 IDR 均值   : {[f"{v:.4f}" for v in drift_mat.mean(axis=0)]}')
-
-    # ── Step 3：执行 Pelicun (FEMA P-58) 损失评估 ────────────────────────
+    # ── Step 2 & 3：直接传入 IDA CSV，执行 Pelicun (FEMA P-58) 损失评估 ──
+    # IdaCsv 会自动在 ImLevel 处插值提取 EDP，无需手动调用 interp_edp_from_ida
     results = la.LossAssessment(
-        MaxDrift        = drift_mat,
-        MaxAccel        = accel_mat,
-        MaxResDrift     = res_arr,        
-        MaxFloorVel     = vel_mat,        
+        IdaCsv          = IDA_CSV,
+        ImLevel         = IM_TARGET,
         StructuralCmp   = struct_cmp,
         ReplacementCost = REPLACEMENT_COST,
         ReplacementTime = REPLACEMENT_TIME,
         CollapseMedian  = 1.5,    # 倒塌易损性中值 Sa (g)，根据实际模型调整
         CollapseLogStd  = 0.4,
-        ImLevel         = IM_TARGET,
         OutputDir       = str(CFDir),
     )
 
