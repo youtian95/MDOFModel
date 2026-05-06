@@ -43,6 +43,7 @@ OCCUPANCY_TYPE  = 'OFFICE'
 
 # 建筑替换费用（美元）
 REPLACEMENT_COST = 5000000.0
+REPLACEMENT_TIME = 365.0 * 250.0   # 倒塌/替换修复时间（工人·天），按实际项目调整
 
 # ── IDA 结果路径（来自 Example 4）────────────────────────────────────────────
 IDA_CSV = str(
@@ -77,6 +78,7 @@ if __name__ == '__main__':
     print(f'  楼层数       : {NUM_OF_STORIES}')
     print(f'  使用类型     : {OCCUPANCY_TYPE}')
     print(f'  替换费用     : {REPLACEMENT_COST:,.0f} USD')
+    print(f'  替换时间     : {REPLACEMENT_TIME:,.0f} 工人·天')
     print()
 
     # ── Step 1：初始化评估对象 ────────────────────────────────────────────
@@ -104,6 +106,7 @@ if __name__ == '__main__':
         MaxFloorVel     = vel_mat,        
         StructuralCmp   = struct_cmp,
         ReplacementCost = REPLACEMENT_COST,
+        ReplacementTime = REPLACEMENT_TIME,
         CollapseMedian  = 1.5,    # 倒塌易损性中值 Sa (g)，根据实际模型调整
         CollapseLogStd  = 0.4,
         ImLevel         = IM_TARGET,

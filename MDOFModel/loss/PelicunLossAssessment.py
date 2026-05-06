@@ -284,6 +284,7 @@ class PelicunLossAssessment:
         MaxResDrift=None,
         StructuralCmp: 'pd.DataFrame | None' = None,
         ReplacementCost: float = None,
+        ReplacementTime: float = None,
         CollapseMedian: float = None,
         CollapseLogStd: float = 0.4,
         PrintLog: bool = False,
@@ -313,6 +314,9 @@ class PelicunLossAssessment:
         ReplacementCost : float, optional
             建筑替换费用（USD_2011），用于倒塌/不可修复后果模型。
             若为 None，则 pelicun 使用其内置默认值。
+        ReplacementTime : float, optional
+            建筑替换/倒塌修复时间（worker_day），用于倒塌/不可修复后果模型。
+            若为 None，则 pelicun 使用其内置默认值（FEMA P-58 下通常为 0）。
         PrintLog : bool
             是否将 Pelicun 运行日志打印到终端，默认 False。
         CollapseMedian : float, optional
@@ -378,7 +382,7 @@ class PelicunLossAssessment:
         output_dir.mkdir(exist_ok=True)
         config_json = self._build_dl_config(
             work_dir, demand_csv, cmp_csv,
-            N, _N, max_res_drift, ReplacementCost,
+            N, _N, max_res_drift, ReplacementCost, ReplacementTime,
             CollapseMedian, CollapseLogStd, PrintLog,
         )
 
@@ -591,6 +595,7 @@ class PelicunLossAssessment:
         sample_size: int,
         max_res_drift,
         replacement_cost: 'float | None',
+        replacement_time: 'float | None',
         collapse_median: 'float | None',
         collapse_logstd: float,
         print_log: bool,
@@ -696,6 +701,11 @@ class PelicunLossAssessment:
             dl_config['DL']['Losses']['BldgRepair']['ReplacementCost'] = {
                 'Median': float(replacement_cost),
                 'Unit':   'USD_2011',
+            }
+        if replacement_time is not None:
+            dl_config['DL']['Losses']['BldgRepair']['ReplacementTime'] = {
+                'Median': float(replacement_time),
+                'Unit':   'worker_day',
             }
 
         config_json = str(work_dir / 'DL_config.json')
