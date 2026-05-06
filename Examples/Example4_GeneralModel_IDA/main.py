@@ -33,14 +33,16 @@ wrapper_model = GeneralModelWrapper(
 
 if __name__ == '__main__':
 
-    print("====== 开始运行 GeneralModelWrapper 的测试分析 ======")
+    # print("====== 开始运行 GeneralModelWrapper 的测试分析 ======")
 
-    # 生成由 0.1g 到 3.0g 的10点长的一系列IM作为IDA输入
-    IM_list = np.linspace(0.1, 3.0, 10).tolist()
+    # # 生成由 0.1g 到 3.0g 的10点长的一系列IM作为IDA输入
+    # IM_list = np.linspace(0.1, 3.0, 10).tolist()
     
-    IDA_obj = IDA.IDAAnalysis(wrapper_model)
-    IDA_result = IDA_obj.Analyze(IM_list, NumPool=8)
+    # IDA_obj = IDA.IDAAnalysis(wrapper_model)
+    # IDA_result = IDA_obj.Analyze(IM_list, NumPool=8)
 
-    IDA_result.to_csv(CFDir/'IDA_results.csv')
+    # IDA_result.to_csv(CFDir/'IDA_results.csv')
 
-    IDA.IDAAnalysis.plot_IDA_results(IDA_result, Stat=True, FigName=CFDir/'IDA.jpg')
+    # IDA.IDAAnalysis.plot_IDA_results(IDA_result, Stat=True, FigName=CFDir/'IDA.jpg')
+
+    IDA.plot_IDA_results_from_csv(CFDir/'IDA_results.csv', Stat=True, FigName=CFDir/'IDA.jpg')

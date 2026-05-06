@@ -49,6 +49,9 @@ class GeneralModelWrapper:
 
     ResDrift: float = 0.0
     """float: 单次动力分析结束后整个结构（通常为全楼层中出现的最大值）的残余层间位移角。"""
+
+    TotalWeight: float = 0.0
+    """float: 自动重力分析中根据节点质量和 g_factor 计算得到的结构总重力。"""
     
     DriftHistory: dict = {}
     """dict[int|str, numpy.ndarray]: 静力推覆(Pushover)等分析后记录的各层位移角时程。包含键 'time' 以及楼层号 (1, 2, ...)，对应值为该层随全过程的一维浮点数 numpy 数组。"""
@@ -119,6 +122,7 @@ class GeneralModelWrapper:
         self.MaxAbsVel = []
         self.MaxRelativeVel = []
         self.ResDrift = []
+        self.TotalWeight = 0.0
 
         # 自动计算基本周期
         ops.wipe()
@@ -137,6 +141,7 @@ class GeneralModelWrapper:
         """自动根据节点的平动质量在重力方向(Y或Z)施加向下的重力荷载并完成静力分析"""
         ops.timeSeries('Linear', 100)
         ops.pattern('Plain', 101, 100)
+        self.TotalWeight = 0.0
         
         node_tags = ops.getNodeTags()
         if not node_tags:
@@ -150,6 +155,7 @@ class GeneralModelWrapper:
                 trans_mass = max(masses[:ndm])
                 if trans_mass > 1e-6:
                     weight_force = -trans_mass * self._g_factor
+                    self.TotalWeight += abs(weight_force)
                     if ndm == 2:
                         ops.load(tag, 0.0, weight_force, 0.0)
                     elif ndm == 3:
@@ -550,7 +556,7 @@ class GeneralModelWrapper:
         lateral_load_pattern_func : Callable, optional
             如果提供了此函数，将用于施加推覆荷载。若是 None，将采用与楼层高度成正比的倒三角模式加载。
         animate : bool, optional
-            是否在分析结束后自动播放推覆动画，同时绘制推覆曲线（基底剪力-顶点位移角）。
+            是否在分析结束后自动播放推覆动画，同时绘制推覆曲线（基底剪力系数 V/W - 顶点位移角）。
         kwargs : dict
             传递给 opsvis.anim_defo() 的其他绘图参数。
             
@@ -711,9 +717,10 @@ class GeneralModelWrapper:
                     
             roof_drift = (roof_disp - base_disp) / total_H if total_H > 0 else roof_disp
             
-            ax.plot(roof_drift, getattr(self, 'BaseShearHistory', np.zeros(len(roof_drift))), 'k-', linewidth=2.0)
+            shear_coeff = getattr(self, 'BaseShearCoefficientHistory', np.zeros(len(roof_drift)))
+            ax.plot(roof_drift, shear_coeff, 'k-', linewidth=2.0)
             ax.set_xlabel('Roof Drift Ratio')
-            ax.set_ylabel('Base Shear')
+            ax.set_ylabel('Base Shear / Weight')
             ax.set_title('Pushover Capacity Curve')
             ax.grid(True)
             
@@ -743,7 +750,7 @@ class GeneralModelWrapper:
         return Iffinish, currentDisp
         
     def _post_process_pushover(self, disp_file, base_disp_file, base_reaction_file):
-        """解析静力推覆的位移记录并存为 DriftHistory 和 NodeDispHistory，提取基底反力为 BaseShearHistory"""
+        """解析静力推覆记录，提取基底剪力及 V/W 系数，并保存位移与层间位移角时程。"""
         try:
             disp_data = np.loadtxt(disp_file)
         except Exception:
@@ -766,6 +773,10 @@ class GeneralModelWrapper:
                 self.BaseShearHistory = -np.sum(react_data[:, 1:], axis=1)
             except:
                 pass
+        if self.TotalWeight > 0.0:
+            self.BaseShearCoefficientHistory = self.BaseShearHistory / self.TotalWeight
+        else:
+            self.BaseShearCoefficientHistory = np.zeros(len(Times))
         
         BaseDisps = np.zeros(len(Times))
         if base_disp_file and base_disp_file.exists():

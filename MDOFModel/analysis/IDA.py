@@ -407,6 +407,35 @@ def interp_edp_from_ida(
     return drift_mat, accel_mat, res_arr, vel_mat
 
 
+def read_IDA_results_csv(csv_file: Union[str, Path]) -> pd.DataFrame:
+    """读取 IDA CSV 并将字符串形式的数组列还原为 numpy 数组。"""
+    def _parse_array_text(value):
+        if not isinstance(value, str):
+            return value
+        text = value.strip()
+        if text == '' or text.lower() == 'nan':
+            return np.array([])
+        return np.fromstring(text.strip('[]').replace(',', ' '), sep=' ')
+
+    converters = {
+        col: _parse_array_text
+        for col in ['MaxDrift', 'MaxAbsAccel', 'MaxRelativeAccel', 'MaxAbsVel', 'ResDrift']
+    }
+    df = pd.read_csv(Path(csv_file), converters=converters)
+    df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+    return df
+
+
+def plot_IDA_results_from_csv(
+    csv_file: Union[str, Path],
+    Stat: bool = True,
+    FigName: Union[str, Path] = 'IDA.jpg',
+):
+    """直接从 IDA 结果 CSV 文件绘制 IDA 曲线图。"""
+    IDA_result = read_IDA_results_csv(csv_file)
+    return IDAAnalysis.plot_IDA_results(IDA_result, Stat=Stat, FigName=FigName)
+
+
 class IDAAnalysis():
     """用于执行 IDA 及其 EDP 模拟的高级接口封装类。"""
 
@@ -465,12 +494,8 @@ class IDAAnalysis():
         FigName : str, optional
             输出图片的文件名。
         """
-        if isinstance(IDA_result, str):
-            # 转换列数组的数据类型: MaxDrift, MaxAbsAccel 等
-            IDA_result = pd.read_csv(IDA_result, converters={
-                col: lambda x: np.fromstring(x.strip('[]'), sep=' ')
-                for col in ['MaxDrift', 'MaxAbsAccel', 'MaxRelativeAccel', 'ResDrift']
-            })
+        if isinstance(IDA_result, (str, Path)):
+            IDA_result = read_IDA_results_csv(IDA_result)
         elif isinstance(IDA_result, pd.DataFrame):
             pass
         else:
@@ -478,13 +503,25 @@ class IDAAnalysis():
 
         cm = 1/2.54  # centimeters in inches
         fig, ax = plt.subplots()   # figsize=(8*cm, 6*cm)
+        EQRecordFile_list = list(Counter(IDA_result['EQRecord'].values).keys())
         if not Stat:
-            EQRecordFile_list = list(Counter(IDA_result['EQRecord'].values).keys())
             for EQRecordFile in EQRecordFile_list:
-                ind = (IDA_result['EQRecord']==EQRecordFile)
-                ax.plot([max(drlist) for drlist in IDA_result['MaxDrift'][ind].values], IDA_result['IM'][ind].values)
+                rows = IDA_result[IDA_result['EQRecord'] == EQRecordFile].sort_values('IM')
+                ax.plot([max(drlist) for drlist in rows['MaxDrift'].values], rows['IM'].values)
         else:
-            IM_list = list(Counter(list(IDA_result['IM'].values)).keys())
+            for i, EQRecordFile in enumerate(EQRecordFile_list):
+                rows = IDA_result[IDA_result['EQRecord'] == EQRecordFile].sort_values('IM')
+                ax.plot(
+                    [max(drlist) for drlist in rows['MaxDrift'].values],
+                    rows['IM'].values,
+                    color='0.75',
+                    linewidth=0.6,
+                    alpha=0.8,
+                    label='Records' if i == 0 else None,
+                    zorder=1,
+                )
+
+            IM_list = sorted(Counter(list(IDA_result['IM'].values)).keys())
             EDPmax_median = []
             EDPmax_1sigma_minus = []
             EDPmax_1sigma_plus = []
@@ -494,9 +531,9 @@ class IDAAnalysis():
                 EDPmax_median.append(np.exp(np.mean(np.log(EDP_values))))
                 EDPmax_1sigma_minus.append(np.exp(np.log(EDPmax_median[-1]) - np.std(np.log(EDP_values))))
                 EDPmax_1sigma_plus.append(np.exp(np.log(EDPmax_median[-1]) + np.std(np.log(EDP_values))))
-            ax.plot(EDPmax_median,IM_list,'k',label='Median')
-            ax.plot(EDPmax_1sigma_minus,IM_list,'b',label='-sigma')
-            ax.plot(EDPmax_1sigma_plus,IM_list,'g',label='+sigma')
+            ax.plot(EDPmax_median,IM_list,'k',label='Median', zorder=3)
+            ax.plot(EDPmax_1sigma_minus,IM_list,'b',label='-sigma', zorder=3)
+            ax.plot(EDPmax_1sigma_plus,IM_list,'g',label='+sigma', zorder=3)
 
         plt.xticks(fontproperties = 'Times New Roman', fontsize=12)
         plt.yticks(np.arange(0, 2, 0.2), fontproperties = 'Times New Roman', fontsize=12)
@@ -520,6 +557,15 @@ class IDAAnalysis():
         ax.set_ylim(bottom=0, top=max(IM_list))
 
         plt.show()
+
+    @staticmethod
+    def plot_IDA_results_from_csv(
+        csv_file: Union[str, Path],
+        Stat: bool = True,
+        FigName: Union[str, Path] = 'IDA.jpg',
+    ):
+        """直接从 IDA 结果 CSV 文件绘制 IDA 曲线图。"""
+        return plot_IDA_results_from_csv(csv_file, Stat=Stat, FigName=FigName)
 
     def SimulateEDPGivenIM(self, IM_list:list, N_Sim, betaM:float = 0) -> pd.DataFrame:
         """利用已存储的 IDA 结果，在指定的 IM 级别下模拟大量 EDP 值。
