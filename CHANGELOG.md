@@ -1,8 +1,13 @@
 # 更新日志
 
-## [unreleased]
+## [0.5.0] - 2026-05-07
 
-- [ ] 增加平面结构的IDA_2D分析，会对两个方向的地震波进行分析，记录两个方向的EDP结果，并且进行Pelicun损失评估时考虑两个方向的结果。
+- [x] 增加`IDA_3D.py`模块，对 FEMA P-695 双向地震动记录对同时分析，IM 取几何均值 Sa，记录 X/Y 双向 EDP（MaxDrift_X/Y、MaxAbsAccel_X/Y 等）。对平面结构：将同一结构在两个方向激励下独立分析。
+- [x] 将例子4、5、6均改为使用`IDA_3D.py`模块进行分析：例子4直接改用 IDA3DAnalysis；例子5使用 IDA3D_to_2d_envelope 取包络后接 Hazus 方法；例子6通过 IdaCsv_3D 参数将 X/Y 双向 EDP 传入 Pelicun，方向1=X，方向2=Y。
+- [x] `CollapseAnalysis` 自动识别 3D IDA CSV（含 MaxDrift_X/Y 列），倒塌判定取两方向最大漂移。
+- [x] `PelicunLossAssessment.LossAssessment` 增加 `IdaCsv_3D` 参数，`_build_demand_csv` 支持传入独立的 Y 方向 EDP。
+- [x] `LossAssessment` 自动识别 3D CSV 格式，并且IDA输入仅支持csv文件或者DataFrame。
+- [x] IDA中计算谱加速度时使用临时文件存储中间结果。
 
 ## [0.4.0] - 2026-05-07
 

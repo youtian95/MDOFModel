@@ -69,6 +69,16 @@ def _max_drift_value(val) -> float:
     return float(arr.max()) if arr.size > 0 else 0.0
 
 
+def _is_3d_csv(df: pd.DataFrame) -> bool:
+    """判断 DataFrame 是否为 3D IDA 格式（含 MaxDrift_X 和 MaxDrift_Y 列）。"""
+    return 'MaxDrift_X' in df.columns and 'MaxDrift_Y' in df.columns
+
+
+def _max_drift_3d(row) -> float:
+    """取 3D IDA 行中 X 和 Y 两方向最大层间位移角的较大值。"""
+    return max(_max_drift_value(row['MaxDrift_X']), _max_drift_value(row['MaxDrift_Y']))
+
+
 class CollapseAnalysis:
     """基于 IDA 结果的倒塌分析类。
 
@@ -126,6 +136,9 @@ class CollapseAnalysis:
         1. Iffinish == False：分析未收敛。
         2. max(MaxDrift) >= collapse_drift_limit（仅当构造时提供了阈值时生效）。
 
+        自动识别 3D IDA CSV 格式（含 MaxDrift_X / MaxDrift_Y 列）：
+        3D 模式下，任一方向超限即判定为倒塌。
+
         Returns
         -------
         pandas.DataFrame
@@ -136,7 +149,10 @@ class CollapseAnalysis:
 
         mask = df['Iffinish'].astype(bool)
         if self.collapse_drift_limit is not None:
-            mask = mask & df['MaxDrift'].apply(_max_drift_value).lt(self.collapse_drift_limit)
+            if _is_3d_csv(df):
+                mask = mask & df.apply(_max_drift_3d, axis=1).lt(self.collapse_drift_limit)
+            else:
+                mask = mask & df['MaxDrift'].apply(_max_drift_value).lt(self.collapse_drift_limit)
 
         return df.loc[mask].reset_index(drop=True)
 
@@ -168,12 +184,14 @@ class CollapseAnalysis:
         df['Iffinish'] = df['Iffinish'].astype(bool)
 
         drift_limit = self.collapse_drift_limit
+        is_3d = _is_3d_csv(df)
 
         def _is_collapse(row) -> bool:
             if not row['Iffinish']:
                 return True
             if drift_limit is not None:
-                return _max_drift_value(row['MaxDrift']) >= drift_limit
+                max_d = _max_drift_3d(row) if is_3d else _max_drift_value(row['MaxDrift'])
+                return max_d >= drift_limit
             return False
 
         df['_collapse'] = df.apply(_is_collapse, axis=1)

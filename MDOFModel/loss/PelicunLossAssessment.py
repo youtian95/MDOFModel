@@ -41,19 +41,10 @@ class PelicunLossAssessment:
             unit_list   = ['ea',           'ea'          ],
         )
 
-        # 3a. 直接传入 IDA CSV（推荐，自动提取 EDP）
+        # 3. 直接传入 IDA CSV（自动识别 2D/3D 格式）
         results = la.LossAssessment(
             IdaCsv        = 'IDA_results.csv',
             ImLevel       = 0.6,            # 目标 Sa (g)
-            StructuralCmp = struct_cmp,
-        )
-
-        # 3b. 或手动传入 EDP 数组（兼容旧用法）
-        results = la.LossAssessment(
-            ImLevel       = 0.6,
-            MaxDrift      = max_drift_list,     # rad，shape (n_records, NumOfStories)
-            MaxAccel      = max_accel_list,     # g，shape (n_records, NumOfStories+1)
-            MaxResDrift   = res_drift_list,     # rad，shape (n_records,)
             StructuralCmp = struct_cmp,
         )
 
@@ -232,67 +223,12 @@ class PelicunLossAssessment:
 
         return cmp_df
 
-    # ------------------------------------------------------------------ IDA 结果插值
-
-    def interp_edp_from_ida(
-        self,
-        ida_csv: 'str | Path',
-        im_target: float,
-    ):
-        """
-        从 IDA 结果 CSV 中提取目标 IM 水平处各条地震波的原始 EDP 样本。
-
-        兼容入口。实际计算由 ``MDOFModel.analysis.IDA.interp_edp_from_ida``
-        完成，并对每条地震波在相邻 IDA 强度水平之间进行线性插值。
-
-        IDA 结果 CSV 应包含以下列（由 MDOFModel.analysis.IDA 输出）：
-          - ``IM``          : 地震动强度水平（Sa，g）
-          - ``Iffinish``    : 是否完成计算的布尔标志
-          - ``MaxDrift``    : 各层最大层间位移角（rad），字符串/数组格式
-          - ``MaxAbsAccel`` : 各楼面最大绝对加速度（mm/s²），字符串/数组格式
-          - ``ResDrift``    : 最大残余层间位移角（rad），标量或数组
-
-        参数
-        ----
-        ida_csv : str or Path
-            IDA 结果 CSV 文件路径（通常为 ``IDA_results.csv``）。
-        im_target : float
-            目标地震动强度（Sa，单位 g）；在相邻 IDA 强度水平之间线性插值。
-
-        返回值
-        ------
-        drift_mat : np.ndarray, shape (n_records, NumOfStories)
-            各条记录各层 IDR 样本，单位 rad。
-        accel_mat : np.ndarray, shape (n_records, NumOfStories+1)
-            各条记录各楼面 PFA 样本，单位 g。
-            第 0 列为地面层 PGA（以 0.4×im_target 近似）。
-        res_arr : np.ndarray, shape (n_records,)
-            各条记录全楼最大 RID 样本，单位 rad。
-        vel_mat : np.ndarray, shape (n_records, NumOfStories+1)
-            各条记录各楼面 PFV 样本，单位 m/s。
-            第 0 列为地面层，第 i 列为第 i 层楼面。
-            若 IDA CSV 中无速度列，则以 10.0 m/s 填充（保守估计）。
-        """
-        warnings.warn(
-            "PelicunLossAssessment.interp_edp_from_ida is kept for compatibility. "
-            "Use MDOFModel.analysis.IDA.interp_edp_from_ida instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        from ..analysis import IDA
-
-        return IDA.interp_edp_from_ida(ida_csv, im_target, self.NumOfStories)
-
     # ------------------------------------------------------------------ 主评估方法
 
     def LossAssessment(
         self,
         ImLevel: float,
-        MaxDrift=None,
-        MaxAccel=None,
-        MaxFloorVel=None,
-        MaxResDrift=None,
-        IdaCsv: 'str | Path | None' = None,
+        IdaCsv: 'str | Path | pd.DataFrame',
         StructuralCmp: 'pd.DataFrame | None' = None,
         ReplacementCost: float = None,
         ReplacementTime: float = None,
@@ -304,27 +240,18 @@ class PelicunLossAssessment:
         """
         执行基于 Pelicun / FEMA P-58 的建筑地震损失评估。
 
-        内部调用 ``pelicun.tools.DL_calculation.run_pelicun``，以 JSON 配置文件
-        + EDP 需求 CSV 作为输入，规避底层 API 变动带来的兼容风险。
-        中间/输出文件写入 ``OutputDir``（默认为当前工作目录下的 ``pelicun_output/``），
-        评估完成后文件保留，可直接检查。
+        自动识别 IDA CSV 格式：
+        - 含 ``MaxDrift_X`` / ``MaxDrift_Y`` 列 → 3D IDA 结果，分别提取 X/Y 双向 EDP
+          并写入 Pelicun 需求 CSV 的方向 1（X）和方向 2（Y）；
+        - 否则视为标准 2D IDA 结果。
 
         参数
         ----
         ImLevel : float
-            输入的地震动水平（IM），用于标识当前评估的地震动强度。单位为 g。
-            当使用 ``IdaCsv`` 时，同时作为插值目标 Sa 值。
-        IdaCsv : str or Path, optional
-            IDA 结果 CSV 文件路径（由 ``MDOFModel.analysis.IDA`` 输出）。
-            提供后将自动插值提取 EDP，并覆盖下面四个 EDP 参数。
-            与直接传入 EDP 数组二选一。
-        MaxDrift : array-like, shape (n_records, NumOfStories), optional
-            各条地震记录各层最大层间位移角（IDR），单位 rad。
-            当 ``IdaCsv`` 已提供时可省略。
-        MaxAccel : array-like, shape (n_records, NumOfStories+1), optional
-            各条地震记录各楼面最大绝对加速度，单位 g。
-            第 0 列为地面层加速度，第 i 列为第 i 层楼面加速度。
-            当 ``IdaCsv`` 已提供时可省略。
+            目标地震动强度（Sa，单位 g），用于从 IDA 结果中插值提取 EDP。
+        IdaCsv : str, Path, or pd.DataFrame
+            IDA 结果 CSV 文件路径或已读取的 DataFrame（由 ``MDOFModel.analysis.IDA`` 或
+            ``MDOFModel.analysis.IDA_3D`` 输出）。
         StructuralCmp : pd.DataFrame, optional
             结构构件定义，由 ``make_struct_cmp()`` 生成。
             列名: cmp, loc, dir, uid, Theta_0, Theta_1, Family, Blocks, Units。
@@ -341,19 +268,11 @@ class PelicunLossAssessment:
             倒塌易损性中值 Sa（g）。若为 None 则不写入倒塌配置。
             写入 pelicun 配置时会自动转换为其所需的 m/s²。
         CollapseLogStd : float
-            倒塌易损性对数标准差，默认 0.4；倒塌能力按对数正态分布处理。
-        MaxResDrift : array-like, shape (n_records, NumOfStories) or (n_records,), optional
-            各条地震记录残余层间位移角（RID），单位 rad。
-            若为一维数组，各层共用同一最大值。
-            若提供，启用 FEMA P-58 不可修复损失评估（``IrreparableDamage``）。
-            若为 None，则跳过残余位移相关计算。
-        MaxFloorVel : array-like, shape (n_records, NumOfStories+1) or (n_records,), optional
-            各条地震记录各楼面最大绝对速度，单位 m/s。
-            第 0 列为地面层速度，第 i 列为第 i 层楼面速度。
-            若为 None，则跳过楼层速度相关计算。
+            倒塌易损性对数标准差，默认 0.4。
+        PrintLog : bool
+            是否将 Pelicun 日志打印到终端，默认 False。
         OutputDir : str or Path, optional
-            输出文件夹路径。若为 None，则默认使用当前工作目录下的 ``pelicun_output/``。
-            文件夹在评估完成后保留，可用于调试检查。
+            输出文件夹路径，默认为当前工作目录下的 ``pelicun_output/``。
 
         返回值
         ------
@@ -372,16 +291,34 @@ class PelicunLossAssessment:
                 "找不到 pelicun 包。请运行: pip install pelicun"
             ) from exc
 
-        # ── IdaCsv 快捷入口：直接从 IDA 结果 CSV 提取 EDP ─────────────────
-        if IdaCsv is not None:
+        # ── 自动识别 2D / 3D IDA CSV 并提取 EDP ──────────────────────────
+        max_drift_y     = None
+        max_accel_y     = None
+        max_floor_vel_y = None
+
+        if isinstance(IdaCsv, pd.DataFrame):
+            _header = IdaCsv
+            _is_3d  = ('MaxDrift_X' in _header.columns and 'MaxDrift_Y' in _header.columns)
+        else:
+            try:
+                _header = pd.read_csv(IdaCsv, nrows=0)
+                _is_3d  = ('MaxDrift_X' in _header.columns and 'MaxDrift_Y' in _header.columns)
+            except Exception:
+                _is_3d = False
+
+        if _is_3d:
+            from ..analysis import IDA_3D as _IDA_3D
+            (MaxDrift, max_drift_y,
+             MaxAccel, max_accel_y,
+             MaxResDrift, _res_y,
+             MaxFloorVel, max_floor_vel_y) = _IDA_3D.interp_edp_from_ida_3D(
+                IdaCsv, ImLevel, self.NumOfStories
+            )
+            MaxResDrift = np.maximum(MaxResDrift, _res_y)
+        else:
             from ..analysis import IDA as _IDA
             MaxDrift, MaxAccel, MaxResDrift, MaxFloorVel = (
                 _IDA.interp_edp_from_ida(IdaCsv, ImLevel, self.NumOfStories)
-            )
-
-        if MaxDrift is None or MaxAccel is None:
-            raise ValueError(
-                "必须提供 MaxDrift 和 MaxAccel，或通过 IdaCsv 指定 IDA 结果文件。"
             )
 
         N = self.NumOfStories
@@ -402,7 +339,12 @@ class PelicunLossAssessment:
         work_dir.mkdir(parents=True, exist_ok=True)
 
         # ── 1. 生成需求 CSV ────────────────────────────────────────────────────
-        demand_csv = self._build_demand_csv(work_dir, max_drift, max_accel, max_res_drift, max_floor_vel, ImLevel)
+        demand_csv = self._build_demand_csv(
+            work_dir, max_drift, max_accel, max_res_drift, max_floor_vel, ImLevel,
+            max_drift_y=max_drift_y,
+            max_accel_y=max_accel_y,
+            max_floor_vel_y=max_floor_vel_y,
+        )
 
         # ── 2. 生成构件量 CSV ─────────────────────────────────────────────────
         cmp_csv = self._build_cmp_csv(work_dir, StructuralCmp)
@@ -492,6 +434,9 @@ class PelicunLossAssessment:
         max_res_drift,
         max_floor_vel=None,
         im_level: float = None,
+        max_drift_y=None,
+        max_accel_y=None,
+        max_floor_vel_y=None,
     ) -> str:
         """
         生成 EDP 需求 CSV 文件并写入 work_dir/demand.csv。
@@ -500,10 +445,13 @@ class PelicunLossAssessment:
           Units 行        — 各列单位（PID/RID → rad，PFA → g，PFV → mps）
           0, 1, 2, ... 行 — 各条地震记录的 EDP 样本
 
-        max_drift       : ndarray (n_records, N)
-        max_accel       : ndarray (n_records, N+1)，col 0 = 地面加速度
+        max_drift       : ndarray (n_records, N)，X 方向漂移
+        max_accel       : ndarray (n_records, N+1)，X 方向加速度，col 0 = 地面层
         max_res_drift   : ndarray (n_records, N) 或 (n_records,) 或 None
-        max_floor_vel   : ndarray (n_records, N+1)，col 0 = 地面层速度，单位 m/s；或 None
+        max_floor_vel   : ndarray (n_records, N+1)，X 方向速度，单位 m/s；或 None
+        max_drift_y     : ndarray (n_records, N)，Y 方向漂移；None 时复制 X
+        max_accel_y     : ndarray (n_records, N+1)，Y 方向加速度；None 时复制 X
+        max_floor_vel_y : ndarray (n_records, N+1)，Y 方向速度；None 时复制 X
 
         列格式：TYPE-LOC-DIR（如 PID-1-1，PFA-0-1，PFV-0-1）。
 
@@ -512,16 +460,23 @@ class PelicunLossAssessment:
         N         = self.NumOfStories
         n_records = max_drift.shape[0]
 
+        # 若未提供 Y 方向数据，则沿用 X 方向（2D 双向相同假设）
+        _drift_y   = np.asarray(max_drift_y,    dtype=float) if max_drift_y    is not None else max_drift
+        _accel_y   = np.asarray(max_accel_y,    dtype=float) if max_accel_y    is not None else max_accel
+        _vel_y     = (np.asarray(max_floor_vel_y, dtype=float)
+                      if max_floor_vel_y is not None else max_floor_vel)
+
         columns: list = []
         units:   list = []
 
-        # 同时写入方向 1 和方向 2（非结构构件通常为双向，pelicun 需要两个方向均存在）
+        # 方向 1（X）和方向 2（Y）漂移
         for i in range(N):
             columns.append(f'1-PID-{i + 1}-1')
             units.append('rad')
         for i in range(N):
             columns.append(f'1-PID-{i + 1}-2')
             units.append('rad')
+        # 方向 1（X）和方向 2（Y）加速度
         for i in range(N + 1):
             columns.append(f'1-PFA-{i}-1')
             units.append('g')
@@ -539,9 +494,11 @@ class PelicunLossAssessment:
                 units.append('rad')
 
         # 楼面速度：支持 (n, N+1) 形状，单位 m/s
-        pfv_2d = None
+        pfv_x_2d = None
+        pfv_y_2d = None
         if max_floor_vel is not None:
-            pfv_2d = np.asarray(max_floor_vel, dtype=float)
+            pfv_x_2d = np.asarray(max_floor_vel, dtype=float)
+            pfv_y_2d = np.asarray(_vel_y, dtype=float)
             for i in range(N + 1):
                 columns.append(f'1-PFV-{i}-1')
                 units.append('mps')
@@ -559,12 +516,15 @@ class PelicunLossAssessment:
         # 构建数据行（每条地震记录一行）
         data_rows = []
         for r in range(n_records):
-            # 方向 1 + 方向 2（相同值，2D 模型按双向相同假设）
-            row = list(max_drift[r]) + list(max_drift[r]) + list(max_accel[r]) + list(max_accel[r])
+            # 方向 1（X）+ 方向 2（Y）的漂移和加速度
+            row = (
+                list(max_drift[r]) + list(_drift_y[r])
+                + list(max_accel[r]) + list(_accel_y[r])
+            )
             if rid_2d is not None:
                 row += list(rid_2d[r])
-            if pfv_2d is not None:
-                row += list(pfv_2d[r]) + list(pfv_2d[r])
+            if pfv_x_2d is not None:
+                row += list(pfv_x_2d[r]) + list(pfv_y_2d[r])
             if sa_arr is not None:
                 row += [sa_arr[r]]
             data_rows.append(row)

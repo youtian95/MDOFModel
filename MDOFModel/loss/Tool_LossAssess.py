@@ -109,7 +109,7 @@ def Simulate_losses_given_IM_basedon_IDA(IDA_result, IM_list, N_Sim, betaM, Outp
     N_Sim : list[int] | int
         每个 IM 级别的模拟次数。若为单元素列表，则取该元素值。
     betaM : float
-        认知不确定参数（对数标准差）。
+        结构模型的不确定性（对数标准差），用于放大 EDP 协方差。
     OutputDir : str
         结果输出目录。如果不为 None，将保存 SimEDP.csv 与 BldLoss.csv。
     NumofStories : int
@@ -129,21 +129,25 @@ def Simulate_losses_given_IM_basedon_IDA(IDA_result, IM_list, N_Sim, betaM, Outp
         返回 (SimEDP, BldLoss) 数据帧，分别为模拟的 EDP 结果和损失评估结果。
     """
 
-    IDA_result = pd.read_csv(Path(IDA_result))
-    IDA_result['Iffinish'] = IDA_result['Iffinish'].astype(bool)
-    # 删除 CSV 读取时可能产生的匿名列
-    IDA_result = IDA_result.loc[:, ~IDA_result.columns.str.contains('^Unnamed')]
-    # 仅保留分析成功完成的行
-    IDA_result = IDA_result.loc[IDA_result['Iffinish'] == 1, :]
-    # 将以字符串形式存储的数组列（MaxDrift / MaxAbsAccel 等）还原为 numpy 数组
-    for ind, row in IDA_result.iterrows():
-        for varname in ['MaxDrift', 'MaxAbsAccel', 'MaxRelativeAccel']:
-            if isinstance(row[varname], str):
-                IDA_result.at[ind, varname] = np.array(
-                    [float(val) for val in
-                     row[varname].replace('[', '').replace(']', '').replace(',', ' ').split()])
+    if isinstance(IDA_result, pd.DataFrame):
+        IDA_result = IDA_result.copy()
+    else:
+        IDA_result = pd.read_csv(Path(IDA_result))
+        # 将以字符串形式存储的数组列（MaxDrift / MaxAbsAccel 等）还原为 numpy 数组
+        for ind, row in IDA_result.iterrows():
+            for varname in ['MaxDrift', 'MaxAbsAccel', 'MaxRelativeAccel']:
+                if varname not in IDA_result.columns:
+                    continue
+                if isinstance(row[varname], str):
+                    IDA_result.at[ind, varname] = np.array(
+                        [float(val) for val in
+                         row[varname].replace('[', '').replace(']', '').replace(',', ' ').split()])
 
     # ── 在给定 IM 下模拟 EDP ─────────────────────────────────────────────────
+    IDA_result = IDA_result.loc[:, ~IDA_result.columns.str.contains('^Unnamed')]
+    IDA_result['Iffinish'] = IDA_result['Iffinish'].astype(bool)
+    IDA_result = IDA_result.loc[IDA_result['Iffinish'], :]
+
     if len(N_Sim) == 1:
         N_Sim = N_Sim[0]
     SimEDP = IDA.SimulateEDPGivenIM(IDA_result, IM_list, N_Sim, betaM)

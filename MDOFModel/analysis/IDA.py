@@ -8,6 +8,7 @@
 from collections import Counter
 import copy
 import multiprocessing as mp
+import tempfile
 import threading
 import pandas as pd
 from typing import Any, Protocol, Tuple, Union
@@ -64,9 +65,14 @@ def IDA_1record(FEModel:IDAModelProtocol, IM_list:list, EQRecordfile:str, period
 
     # 计算谱加速度
     p = Path(EQRecordfile)
-    dt, nPts = ReadRecord.ReadRecord(EQRecordfile, (Path(p.parent,'temp_'+ p.name +'.dat')).as_posix())
-    with open(Path(p.parent,'temp_'+ p.name +'.dat'), "r") as f:
-        Allstr = f.read()
+    with tempfile.NamedTemporaryFile(suffix='.dat', mode='w', delete=False) as _tmp_f:
+        _tmp_path = _tmp_f.name
+    try:
+        dt, nPts = ReadRecord.ReadRecord(EQRecordfile, _tmp_path)
+        with open(_tmp_path, 'r') as f:
+            Allstr = f.read()
+    finally:
+        Path(_tmp_path).unlink(missing_ok=True)
     Allstr = Allstr.split()
     Accel = np.array(Allstr).astype(float)
     record = eqsig.AccSignal(Accel * 9.8, dt)
@@ -339,7 +345,7 @@ def _interp_ida_value(rows: pd.DataFrame, im_target: float, column: str):
 
 
 def interp_edp_from_ida(
-    ida_csv: Union[str, Path],
+    ida_csv: Union[str, Path, 'pd.DataFrame'],
     im_target: float,
     num_stories: int,
 ):
@@ -348,7 +354,10 @@ def interp_edp_from_ida(
     linear interpolation between adjacent IM levels.
     """
     N = int(num_stories)
-    df = pd.read_csv(Path(ida_csv))
+    if isinstance(ida_csv, pd.DataFrame):
+        df = ida_csv.copy()
+    else:
+        df = pd.read_csv(Path(ida_csv))
     df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
     df['Iffinish'] = df['Iffinish'].astype(bool)
     df = df.loc[df['Iffinish'], :].reset_index(drop=True)
