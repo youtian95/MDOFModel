@@ -482,6 +482,20 @@ class IDAAnalysis():
         self.IDA_result = IDA_f(self.FEModel, IM_list, period, EQRecordfile_list, DeltaT, NumPool)
         return self.IDA_result
 
+    def SaveToCSV(self, OutputCSVFile: Union[str, Path]) -> None:
+        """将 IDA 分析结果保存为 CSV 文件。
+
+        输出格式与 ``Tool_IDA.py`` 中的保存方式完全一致。
+
+        Parameters
+        ----------
+        OutputCSVFile : str or Path
+            输出 CSV 文件路径。
+        """
+        if self.IDA_result is None:
+            raise RuntimeError("尚未执行 IDA 分析，请先调用 Analyze() 方法。")
+        self.IDA_result.to_csv(Path(OutputCSVFile), index=False, encoding='utf-8-sig')
+
     def plot_IDA_results(IDA_result, Stat:bool = False, FigName:Union[str, Path] = 'IDA.jpg'):
         """根据结果绘制单条曲线或带有统计信息的 IDA 包络图。
 

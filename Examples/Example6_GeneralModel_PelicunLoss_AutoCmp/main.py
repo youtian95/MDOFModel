@@ -33,12 +33,14 @@ if examples_dir not in sys.path:
     sys.path.insert(0, examples_dir)
 
 from MDOFModel.loss.PelicunLossAssessment import PelicunLossAssessment
+from MDOFModel.analysis import Collapse
 
 # ── 模型参数 ─────────────────────────────────────────────────────────────────
 NUM_OF_STORIES  = 6
 FLOOR_AREA_M2   = 324.0                        # m²/层
 FLOOR_AREA_SQFT = FLOOR_AREA_M2 * 10.764       # ≈ 3487 sqft/层
 OCCUPANCY_TYPE  = 'OFFICE'
+BUILDING_TYPE   = 'S1L'    # Hazus 结构类型代码，用于查询倒塌位移角阈值
 
 # 建筑替换费用（美元）
 REPLACEMENT_COST = 5000000.0
@@ -50,7 +52,7 @@ IDA_CSV = str(
 )
 
 # ── 目标 Sa (g) ───────────────────────────────────────────────────────────────
-IM_TARGET = 0.6     # g
+IM_TARGET = 2.0     # g
 
 # ── 结构构件定义 ──────────────────────────────────────────────────────────────
 # 每层 8 个 SMF 节点（B.10.41.001a）
@@ -80,26 +82,37 @@ if __name__ == '__main__':
     print(f'  替换时间     : {REPLACEMENT_TIME:,.0f} 工人·天')
     print()
 
-    # ── Step 1：初始化评估对象 ────────────────────────────────────────────
+    # ── Step 1：倒塌分析 ──────────────────────────────────────────────────
+    # 用完整 IDA 结果（含倒塌记录）拟合倒塌易损性，MLE 估计中值和对数标准差
+    ca = Collapse.CollapseAnalysis(IDA_CSV, building_type=BUILDING_TYPE)
+    collapse_result = ca.fit_collapse_fragility(fig_path=str(CFDir / 'collapse_fragility.jpg'))
+    collapse_median = collapse_result['median']
+    collapse_logstd = collapse_result['logstd']
+    print(f'  倒塌易损性中值 Sa: {collapse_median:.3f} g')
+    print(f'  倒塌易损性对数标准差: {collapse_logstd:.3f}')
+
+    # 筛选非倒塌记录，保存为供损失评估使用的 CSV
+    filtered_df = ca.filter_collapse()
+    filtered_csv = str(CFDir / 'IDA_results_filtered.csv')
+    filtered_df.to_csv(filtered_csv, index=False, encoding='utf-8-sig')
+
+    # ── Step 2：初始化评估对象 ────────────────────────────────────────────
     la = PelicunLossAssessment(
         NumOfStories        = NUM_OF_STORIES,
         FloorArea_sqft      = FLOOR_AREA_SQFT,
-        OccupancyType       = OCCUPANCY_TYPE,
-        SampleSize          = 500,
-        IrreparableMedian   = 0.01,
-        IrreparableLogStd   = 0.3,
+        OccupancyType       = OCCUPANCY_TYPE
     )
 
-    # ── Step 2 & 3：直接传入 IDA CSV，执行 Pelicun (FEMA P-58) 损失评估 ──
-    # IdaCsv 会自动在 ImLevel 处插值提取 EDP，无需手动调用 interp_edp_from_ida
+    # ── Step 3：执行 Pelicun (FEMA P-58) 损失评估 ────────────────────────
+    # 使用筛选后的 IDA CSV（不含倒塌记录）+ 由 Collapse 模块拟合的倒塌参数
     results = la.LossAssessment(
-        IdaCsv          = IDA_CSV,
+        IdaCsv          = filtered_csv,
         ImLevel         = IM_TARGET,
         StructuralCmp   = struct_cmp,
         ReplacementCost = REPLACEMENT_COST,
         ReplacementTime = REPLACEMENT_TIME,
-        CollapseMedian  = 1.5,    # 倒塌易损性中值 Sa (g)，根据实际模型调整
-        CollapseLogStd  = 0.4,
+        CollapseMedian  = collapse_median,
+        CollapseLogStd  = collapse_logstd,
         OutputDir       = str(CFDir),
     )
 
@@ -107,10 +120,11 @@ if __name__ == '__main__':
     print('\n' + '=' * 65)
     print('  损失评估结果汇总（FEMA P-58 方法）')
     print('=' * 65)
-    print(f'  平均修复费用 (USD)   : {results["MeanRepairCost"]:,.0f}')
-    print(f'  修复费用标准差 (USD) : {results["StdRepairCost"]:,.0f}')
-    if results['MeanRepairTime'] is not None:
-        print(f'  平均修复时间 (工人·天): {results["MeanRepairTime"]:,.1f}')
+    print(f'  倒塌概率: {results["CollapseProb"]:.4f}  ({results["CollapseProb"]*100:.2f}%)')
+    print(f'  不可修复概率: {results["IrreparableProb"]:.4f}  ({results["IrreparableProb"]*100:.2f}%)')
+    print(f'  平均修复费用 (USD): {results["MeanRepairCost"]:,.0f}')
+    print(f'  修复费用标准差 (USD): {results["StdRepairCost"]:,.0f}')
+    print(f'  平均修复时间 (工人·天): {results["MeanRepairTime"]:,.1f}')
 
     # 损失分布分位数
     agg = results['AggLoss']

@@ -131,6 +131,8 @@ class PelicunLossAssessment:
         self.StdRepairCost: float | None = None
         self.MeanRepairTime: float | None = None
         self.AggLoss: pd.DataFrame | None = None
+        self.CollapseProb: float | None = None
+        self.IrreparableProb: float | None = None
 
     # ------------------------------------------------------------------ 辅助工具
 
@@ -355,11 +357,13 @@ class PelicunLossAssessment:
 
         返回值
         ------
-        dict
-            ``'MeanRepairCost'`` : float — 平均修复费用（USD）。
-            ``'StdRepairCost'``  : float — 修复费用标准差（USD）。
-            ``'MeanRepairTime'`` : float or None — 平均顺序修复时间（工人·天）。
-            ``'AggLoss'``        : pd.DataFrame — 完整聚合损失样本。
+        dict，包含以下键值：
+        'MeanRepairCost' (float) — 平均修复费用（USD）；
+        'StdRepairCost' (float) — 修复费用标准差（USD）；
+        'MeanRepairTime' (float or None) — 平均顺序修复时间（工人·天）；
+        'CollapseProb' (float or None) — 倒塌概率（从 DL_summary.csv 的 collapse 列均值读取）；
+        'IrreparableProb' (float or None) — 不可修复概率（从 DL_summary.csv 的 irreparable 列均值读取）；
+        'AggLoss' (pd.DataFrame) — 完整聚合损失样本。
         """
         try:
             from pelicun.tools.DL_calculation import run_pelicun
@@ -445,7 +449,23 @@ class PelicunLossAssessment:
         agg_repair = pd.read_csv(agg_zip, index_col=0, compression='zip')
         self.AggLoss = agg_repair
 
-        # ── 6. 汇总指标 ──────────────────────────────────────────────────────
+        # ── 6. 从 DL_summary.csv 读取倒塌概率和不可修复概率 ────────────────
+        dl_summary_path = output_dir / 'DL_summary.csv'
+        if dl_summary_path.exists():
+            dl_summary = pd.read_csv(dl_summary_path, index_col=0)
+            self.CollapseProb = (
+                float(dl_summary['collapse'].mean())
+                if 'collapse' in dl_summary.columns else None
+            )
+            self.IrreparableProb = (
+                float(dl_summary['irreparable'].mean())
+                if 'irreparable' in dl_summary.columns else None
+            )
+        else:
+            self.CollapseProb = None
+            self.IrreparableProb = None
+
+        # ── 7. 汇总指标 ──────────────────────────────────────────────────────
         cost_col = self._find_col(agg_repair, 'Cost')
         time_col = self._find_col(agg_repair, 'Time')
 
@@ -454,10 +474,12 @@ class PelicunLossAssessment:
         self.MeanRepairTime = float(agg_repair[time_col].mean()) if time_col is not None else None
 
         return {
-            'MeanRepairCost': self.MeanRepairCost,
-            'StdRepairCost':  self.StdRepairCost,
-            'MeanRepairTime': self.MeanRepairTime,
-            'AggLoss':        agg_repair,
+            'MeanRepairCost':  self.MeanRepairCost,
+            'StdRepairCost':   self.StdRepairCost,
+            'MeanRepairTime':  self.MeanRepairTime,
+            'CollapseProb':    self.CollapseProb,
+            'IrreparableProb': self.IrreparableProb,
+            'AggLoss':         agg_repair,
         }
 
     # ------------------------------------------------------------------ 内部工具

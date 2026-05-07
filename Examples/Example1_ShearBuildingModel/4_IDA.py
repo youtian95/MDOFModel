@@ -5,6 +5,7 @@ import pandas as pd
 import numpy as np
 
 from MDOFModel.analysis import IDA
+from MDOFModel.analysis import Collapse
 from MDOFModel.models import MDOF_LU as mlu
 from MDOFModel.models import MDOFOpenSees as mops
 import MDOFModel
@@ -38,6 +39,8 @@ if __name__ == '__main__':
 
     print('Processing time %s sec' % ((T2 - T1)))
 
-    IDA_result.to_csv(str(CFDir/'IDA_results.csv'))
+    IDA_obj.SaveToCSV(str(CFDir/'IDA_results.csv'))
+    ca = Collapse.CollapseAnalysis(CFDir/'IDA_results.csv')
+    IDA_result_filtered = ca.filter_collapse()
 
     IDA.IDAAnalysis.plot_IDA_results(IDA_result, Stat=True, FigName=str(CFDir/'IDA.jpg'))

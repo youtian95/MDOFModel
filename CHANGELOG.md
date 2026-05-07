@@ -2,8 +2,13 @@
 
 ## [unreleased]
 
-- [ ] EDP读取IDA分析结果时应该剔除掉倒塌的地震波用于后续的损失评估。
 - [ ] 增加平面结构的IDA_2D分析，会对两个方向的地震波进行分析，记录两个方向的EDP结果，并且进行Pelicun损失评估时考虑两个方向的结果。
+
+## [0.4.0] - 2026-05-07
+
+- [x] `IDA`模块中，类增加专门的输出为csv文件的函数，输出方式跟`Tool_IDA.py`中输出csv文件的方式一样。
+- [x] 增加`Collapse`模块，IDA分析输出CSV文件结果后，应该调用`Collapse`模块。`Collapse`模块包含`filter_collapse`（剔除倒塌记录）和`fit_collapse_fragility`（MLE拟合倒塌易损性中值和对数标准差）。损失评估流程中，IDA分析之后调用Collapse模块得到倒塌概率和筛选后的IDA，然后进行损失评估。
+- [x] `LossAssessment`返回的结果中增加倒塌概率和不可修复概率。
 
 ## [0.3.6] - 2026-05-06
 
