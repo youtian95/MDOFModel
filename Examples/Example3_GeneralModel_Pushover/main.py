@@ -26,10 +26,11 @@ wrapper_model = GeneralModelWrapper(
 
 if __name__ == '__main__':
     
-    print("====== Running GeneralModelWrapper Pushover Analysis ======")
-    max_disp = 1000.0  # 1 meter displacement control for the roof
+    print("====== Running GeneralModelWrapper Cyclic Hysteresis Analysis ======")
+    max_disp = 1000.0  # 1 meter peak displacement at roof
+    # One full cycle: 0 → +max → -max → +max → 0
     wrapper_model.StaticPushover(
-        maxU=[max_disp],
+        maxU=[max_disp, -max_disp, max_disp, 0.0],
         dU=10.0,  # 10 mm steps
         CFloor='roof',
         animate=True

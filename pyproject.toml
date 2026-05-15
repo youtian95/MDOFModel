@@ -4,11 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "MDOFModel"
-version = "0.2.0"
+version = "0.5.1"
 authors = [
     {name = "Tian You", email = "youtian@njtech.edu.cn"},
 ]
-description = "Generate MDOF lumped mass FE model using basic building information"
+description = "Generate MDOF lumped mass FE model using basic building information. Manupulate general OpenSees model to perform IDA and FEMA P-58 loss assessment."
 readme = "README.md"
 requires-python = ">=3.12"
 classifiers = [
@@ -25,7 +25,7 @@ dependencies = [
     "eqsig",
     "Opsvis",
     "tqdm",
-    "pelicun"
+    "pelicun",
     "normqtypact"
 ]
 
