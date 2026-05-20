@@ -5,8 +5,9 @@
 #   1. 输入 EDP（层间位移角、楼面加速度、残余位移角）
 #   2. 非结构构件数量由 NormQtyPact 自动生成（需要 Windows + Excel）
 #   3. 结构构件由用户以 Pelicun CMP marginals 格式提供
-#   4. 调用 Pelicun (FEMA P-58) 执行概率性损失评估
-#   5. 返回修复费用、修复时间等汇总结果
+#   4. 可选：用户自定义构件（完整易损性 + 损失后果参数），EDP 类型须在 demand.csv 中已有
+#   5. 调用 Pelicun (FEMA P-58) 执行概率性损失评估
+#   6. 返回修复费用、修复时间等汇总结果
 ########################################################
 
 import json
@@ -14,6 +15,29 @@ from pathlib import Path
 import warnings
 import numpy as np
 import pandas as pd
+from pelicun.tools.DL_calculation import run_pelicun
+from pelicun import base as _pelicun_base
+
+# EDP 短名 → Pelicun fragility CSV 所用的全名
+_EDP_DEMAND_TYPE = {
+    'PID': 'Peak Interstory Drift Ratio',
+    'PFA': 'Peak Floor Acceleration',
+    'PFV': 'Peak Floor Velocity',
+    'RID': 'Residual Interstory Drift Ratio',
+    'SA':  'Spectral Acceleration',
+    'PGV': 'Peak Ground Velocity',
+}
+
+# EDP 短名 → fragility CSV 中 Demand-Unit 字段值
+# 注：pelicun 3.9+ 将无量纲漂移角统一使用 'unitless'（老版本为 'ea'/'rad'）
+_EDP_DEMAND_UNIT = {
+    'PID': 'unitless',
+    'PFA': 'g',
+    'PFV': 'mps',
+    'RID': 'unitless',
+    'SA':  'g',
+    'PGV': 'mps',
+}
 
 
 class PelicunLossAssessment:
@@ -190,6 +214,123 @@ class PelicunLossAssessment:
             }
         )
 
+    @staticmethod
+    def make_custom_cmp(
+        cmp_id_list: list,
+        edp_type_list: list,
+        loc_list: list,
+        dir_list: list,
+        qty_list: list,
+        frag_theta_0: list,
+        frag_theta_1: list,
+        cost_theta_0: list,
+        cost_theta_1: list,
+        time_theta_0: list,
+        time_theta_1: list,
+        unit_list: list = None,
+        demand_offset: list = None,
+        demand_directional: list = None,
+    ) -> pd.DataFrame:
+        """
+        创建自定义构件 DataFrame（辅助方法），支持用户完全自定义易损性和损失后果参数。
+
+        返回的 DataFrame 可直接传入 ``LossAssessment(CustomComponents=...)``。
+        自定义构件与 FEMA P-58 数据库中的标准构件一同参与评估。
+
+        参数
+        ----
+        cmp_id_list : list[str]
+            构件 ID 列表（自定义 ID，不能与 FEMA P-58 数据库中已有 ID 重复）。
+            同一 ID 可在不同楼层重复出现。
+        edp_type_list : list[str]
+            各行对应的 EDP 类型，支持：'PID'、'PFA'、'PFV'、'RID'、'SA'。
+            **须在 IDA 分析结果中已存在**（即 demand.csv 中已有对应列）。
+            同一 cmp_id 的所有行须使用相同的 EDP 类型。
+        loc_list : list[str]
+            各行对应的楼层编号，字符串，如 ['1', '2', '3', ...]。
+        dir_list : list[str]
+            各行对应的方向，字符串，如 ['1', '1', ...] ('1'=X, '2'=Y)。
+        qty_list : list[float]
+            各行的构件数量。
+        frag_theta_0 : list
+            易损性中值。每个元素可以是：
+
+            - **float**：单损伤状态（DS1），中值。
+            - **list[float]**：多损伤状态（DS1, DS2, ...），各状态的中值。
+
+            与 cmp_id_list 等长（同一 cmp_id 的不同楼层行须保持一致）。
+        frag_theta_1 : list
+            易损性对数标准差，格式与 frag_theta_0 相同。
+        cost_theta_0 : list
+            修复费用（USD_2011）中值，格式与 frag_theta_0 相同（各 DS 一个值）。
+        cost_theta_1 : list
+            修复费用对数标准差，格式与 frag_theta_0 相同（0 = 确定性）。
+        time_theta_0 : list
+            修复时间（worker_day）中值，格式与 frag_theta_0 相同（各 DS 一个值）。
+        time_theta_1 : list
+            修复时间对数标准差，格式与 frag_theta_0 相同（0 = 确定性）。
+        unit_list : list[str], optional
+            各行数量单位，默认全部为 'ea'。
+        demand_offset : list[int], optional
+            各行的 Demand-Offset（0 = 使用本层需求，1 = 使用上层需求），默认全部为 0。
+        demand_directional : list[int], optional
+            各行的 Demand-Directional（1 = 有方向性，0 = 无方向性），默认全部为 1。
+
+        返回值
+        ------
+        pd.DataFrame
+            可直接传入 ``LossAssessment(CustomComponents=...)`` 的 DataFrame。
+
+        示例
+        ----
+        定义一个 6 层建筑中使用楼面速度（PFV）的自定义构件，每层 2 个，共 2 个损伤状态::
+
+            custom_cmp = PelicunLossAssessment.make_custom_cmp(
+                cmp_id_list    = ['MyEqp.001'] * 6,
+                edp_type_list  = ['PFV']        * 6,
+                loc_list       = [str(i+1) for i in range(6)],
+                dir_list       = ['1']          * 6,
+                qty_list       = [2.0]          * 6,
+                frag_theta_0   = [[0.3, 0.8]]   * 6,   # DS1: 0.3 m/s, DS2: 0.8 m/s
+                frag_theta_1   = [[0.4, 0.4]]   * 6,
+                cost_theta_0   = [[5000, 15000]] * 6,  # DS1: 5000 USD, DS2: 15000 USD
+                cost_theta_1   = [[0.4, 0.4]]   * 6,
+                time_theta_0   = [[1.0, 5.0]]   * 6,   # DS1: 1 day, DS2: 5 days
+                time_theta_1   = [[0.4, 0.4]]   * 6,
+            )
+        """
+        n = len(cmp_id_list)
+        # 统一将标量参数包装为列表（单 DS 情形）
+        def _to_list_of_lists(vals):
+            result = []
+            for v in vals:
+                result.append([float(v)] if not isinstance(v, (list, tuple)) else [float(x) for x in v])
+            return result
+
+        frag_t0 = _to_list_of_lists(frag_theta_0)
+        frag_t1 = _to_list_of_lists(frag_theta_1)
+        cost_t0 = _to_list_of_lists(cost_theta_0)
+        cost_t1 = _to_list_of_lists(cost_theta_1)
+        time_t0 = _to_list_of_lists(time_theta_0)
+        time_t1 = _to_list_of_lists(time_theta_1)
+
+        return pd.DataFrame({
+            'cmp':                  cmp_id_list,
+            'edp_type':             [str(x).upper() for x in edp_type_list],
+            'loc':                  [str(x) for x in loc_list],
+            'dir':                  [str(x) for x in dir_list],
+            'qty':                  [float(x) for x in qty_list],
+            'Units':                unit_list if unit_list is not None else ['ea'] * n,
+            'demand_offset':        demand_offset if demand_offset is not None else [0] * n,
+            'demand_directional':   demand_directional if demand_directional is not None else [1] * n,
+            'frag_theta_0':         frag_t0,
+            'frag_theta_1':         frag_t1,
+            'cost_theta_0':         cost_t0,
+            'cost_theta_1':         cost_t1,
+            'time_theta_0':         time_t0,
+            'time_theta_1':         time_t1,
+        })
+
     # ------------------------------------------------------------------ 非结构构件生成
 
     def _build_nonstruct_cmp(self, tmp_dir: str) -> pd.DataFrame:
@@ -230,6 +371,7 @@ class PelicunLossAssessment:
         ImLevel: float,
         IdaCsv: 'str | Path | pd.DataFrame',
         StructuralCmp: 'pd.DataFrame | None' = None,
+        CustomComponents: 'pd.DataFrame | None' = None,
         ReplacementCost: float = None,
         ReplacementTime: float = None,
         CollapseMedian: float = None,
@@ -256,14 +398,17 @@ class PelicunLossAssessment:
             结构构件定义，由 ``make_struct_cmp()`` 生成。
             列名: cmp, loc, dir, uid, Theta_0, Theta_1, Family, Blocks, Units。
             若为 None 则仅使用非结构构件（需要 NormQtyPact）。
+        CustomComponents : pd.DataFrame, optional
+            用户完全自定义的构件定义，由 ``make_custom_cmp()`` 生成。
+            包含易损性参数和损失后果参数，不依赖 FEMA P-58 数据库。
+            **EDP 类型须在 demand.csv 中已存在**（PID、PFA、PFV、RID、SA）。
+            若同时提供 StructuralCmp 和 CustomComponents，两者将合并使用。
         ReplacementCost : float, optional
             建筑替换费用（USD_2011），用于倒塌/不可修复后果模型。
             若为 None，则 pelicun 使用其内置默认值。
         ReplacementTime : float, optional
             建筑替换/倒塌修复时间（worker_day），用于倒塌/不可修复后果模型。
             若为 None，则 pelicun 使用其内置默认值（FEMA P-58 下通常为 0）。
-        PrintLog : bool
-            是否将 Pelicun 运行日志打印到终端，默认 False。
         CollapseMedian : float, optional
             倒塌易损性中值 Sa（g）。若为 None 则不写入倒塌配置。
             写入 pelicun 配置时会自动转换为其所需的 m/s²。
@@ -284,17 +429,14 @@ class PelicunLossAssessment:
         'IrreparableProb' (float or None) — 不可修复概率（从 DL_summary.csv 的 irreparable 列均值读取）；
         'AggLoss' (pd.DataFrame) — 完整聚合损失样本。
         """
-        try:
-            from pelicun.tools.DL_calculation import run_pelicun
-        except ImportError as exc:
-            raise ImportError(
-                "找不到 pelicun 包。请运行: pip install pelicun"
-            ) from exc
 
         # ── 自动识别 2D / 3D IDA CSV 并提取 EDP ──────────────────────────
         max_drift_y     = None
         max_accel_y     = None
         max_floor_vel_y = None
+        max_pgv_y       = None
+        extra_edp       = {}
+        extra_edp_y     = {}
 
         if isinstance(IdaCsv, pd.DataFrame):
             _header = IdaCsv
@@ -311,15 +453,18 @@ class PelicunLossAssessment:
             (MaxDrift, max_drift_y,
              MaxAccel, max_accel_y,
              MaxResDrift, _res_y,
-             MaxFloorVel, max_floor_vel_y) = _IDA_3D.interp_edp_from_ida_3D(
+             MaxFloorVel, max_floor_vel_y,
+             MaxPGV, max_pgv_y,
+             extra_edp, extra_edp_y) = _IDA_3D.interp_edp_from_ida_3D(
                 IdaCsv, ImLevel, self.NumOfStories
             )
             MaxResDrift = np.maximum(MaxResDrift, _res_y)
         else:
             from ..analysis import IDA as _IDA
-            MaxDrift, MaxAccel, MaxResDrift, MaxFloorVel = (
+            (MaxDrift, MaxAccel, MaxResDrift, MaxFloorVel, MaxPGV, extra_edp) = (
                 _IDA.interp_edp_from_ida(IdaCsv, ImLevel, self.NumOfStories)
             )
+            extra_edp_y = extra_edp  # 2D 分析两方向共用同一组 EDP
 
         N = self.NumOfStories
         max_drift = np.clip(np.asarray(MaxDrift, dtype=float), 1e-8, None)
@@ -331,6 +476,10 @@ class PelicunLossAssessment:
         max_floor_vel = (
             np.clip(np.asarray(MaxFloorVel, dtype=float), 1e-8, None)
             if MaxFloorVel is not None else None
+        )
+        max_pgv = (
+            np.clip(np.asarray(MaxPGV, dtype=float), 1e-8, None)
+            if MaxPGV is not None else None
         )
         _N = self.SampleSize   # pelicun 从 IDA 样本拟合分布并重采到该数量
 
@@ -344,10 +493,45 @@ class PelicunLossAssessment:
             max_drift_y=max_drift_y,
             max_accel_y=max_accel_y,
             max_floor_vel_y=max_floor_vel_y,
+            max_pgv=max_pgv,
+            max_pgv_y=max_pgv_y,
+            extra_edp=extra_edp if extra_edp else None,
+            extra_edp_y=extra_edp_y if extra_edp_y else None,
         )
 
+        # ── 1b. 验证自定义构件的 EDP 类型 ─────────────────────────────────────
+        if CustomComponents is not None and len(CustomComponents) > 0:
+            _demand_cols = pd.read_csv(demand_csv, nrows=0).columns
+            _available_edp = {
+                col.split('-')[1]
+                for col in _demand_cols
+                if len(col.split('-')) >= 3
+            }
+            _bad = [
+                (row['cmp'], row['edp_type'])
+                for _, row in CustomComponents.iterrows()
+                if str(row['edp_type']).upper() not in _available_edp
+            ]
+            if _bad:
+                _bad_types = sorted({t for _, t in _bad})
+                raise ValueError(
+                    f"[LossAssessment] 自定义构件使用了 demand.csv 中不存在的 EDP 类型：{_bad_types}。\n"
+                    f"  当前 demand.csv 中已有的 EDP 类型：{sorted(_available_edp)}。\n"
+                    f"  请确认该 EDP 类型在 IDA 结果中已存在，或参考第二步（Task 2）"
+                    f"向 IDA 结果中添加新 EDP 类型。\n"
+                    f"  问题构件：{[(c, t) for c, t in _bad[:5]]}"
+                )
+
         # ── 2. 生成构件量 CSV ─────────────────────────────────────────────────
-        cmp_csv = self._build_cmp_csv(work_dir, StructuralCmp)
+        cmp_csv = self._build_cmp_csv(work_dir, StructuralCmp, CustomComponents)
+
+        # ── 2b. 生成自定义构件数据库（fragility + repair consequence）─────────
+        custom_fragility_db = None
+        custom_repair_db    = None
+        if CustomComponents is not None and len(CustomComponents) > 0:
+            custom_fragility_db, custom_repair_db = self._build_custom_cmp_db(
+                work_dir, CustomComponents
+            )
 
         # ── 3. 生成 JSON 配置文件 ─────────────────────────────────────────────
         output_dir = work_dir / 'output'
@@ -356,9 +540,23 @@ class PelicunLossAssessment:
             work_dir, demand_csv, cmp_csv,
             N, _N, max_res_drift, ReplacementCost, ReplacementTime,
             CollapseMedian, CollapseLogStd, PrintLog,
+            custom_fragility_db=custom_fragility_db,
+            custom_repair_db=custom_repair_db,
         )
 
-        # ── 4. 调用 run_pelicun ───────────────────────────────────────────────
+        # ── 4. 注入自定义 EDP 类型到 pelicun 的 demand type 映射表 ───────────
+        # pelicun 的 base.EDP_to_demand_type 只内置标准类型（PID/PFA/PFV…）。
+        # 对于 CustomComponents 中用户自定义的 EDP 类型（如 'STRAIN'），
+        # 采用自映射 'STRAIN' → 'STRAIN'，使 pelicun 能正常解析并构建 EDP 键
+        # （格式 '{TYPE}-{loc}-{dir}'），与 demand.csv 中列名 '1-{TYPE}-{loc}-1' 对应。
+        if CustomComponents is not None and len(CustomComponents) > 0:
+            for _raw_edp in CustomComponents['edp_type'].unique():
+                _edp_up = str(_raw_edp).upper()
+                # 如果不存在，注入自映射（如 'STRAIN' → 'STRAIN'）
+                if _edp_up not in _EDP_DEMAND_TYPE:
+                    _pelicun_base.EDP_to_demand_type[_edp_up] = _edp_up
+
+        # ── 5. 调用 run_pelicun ───────────────────────────────────────────────
         with warnings.catch_warnings():
             warnings.simplefilter('ignore')
             run_pelicun(
@@ -373,7 +571,7 @@ class PelicunLossAssessment:
                 coupled_edp      = False,
             )
 
-        # ── 5. 读取聚合损失结果 ───────────────────────────────────────────────
+        # ── 6. 读取聚合损失结果 ───────────────────────────────────────────────
         # 不同 pelicun 版本对同一 BldgRepair 模块使用过两种输出文件名：
         # DV_repair_agg.zip 与 DV_bldg_repair_agg.zip。配置仍只使用 BldgRepair。
         #   repair_cost / repair_time-sequential / repair_time-parallel
@@ -391,7 +589,7 @@ class PelicunLossAssessment:
         agg_repair = pd.read_csv(agg_zip, index_col=0, compression='zip')
         self.AggLoss = agg_repair
 
-        # ── 6. 从 DL_summary.csv 读取倒塌概率和不可修复概率 ────────────────
+        # ── 7. 从 DL_summary.csv 读取倒塌概率和不可修复概率 ────────────────
         dl_summary_path = output_dir / 'DL_summary.csv'
         if dl_summary_path.exists():
             dl_summary = pd.read_csv(dl_summary_path, index_col=0)
@@ -437,6 +635,10 @@ class PelicunLossAssessment:
         max_drift_y=None,
         max_accel_y=None,
         max_floor_vel_y=None,
+        max_pgv=None,
+        max_pgv_y=None,
+        extra_edp=None,
+        extra_edp_y=None,
     ) -> str:
         """
         生成 EDP 需求 CSV 文件并写入 work_dir/demand.csv。
@@ -452,6 +654,8 @@ class PelicunLossAssessment:
         max_drift_y     : ndarray (n_records, N)，Y 方向漂移；None 时复制 X
         max_accel_y     : ndarray (n_records, N+1)，Y 方向加速度；None 时复制 X
         max_floor_vel_y : ndarray (n_records, N+1)，Y 方向速度；None 时复制 X
+        extra_edp       : dict[str, ndarray]，用户自定义 EDP（X 方向或 2D），形状 (n_records, M) 或 (n_records,)；或 None
+        extra_edp_y     : dict[str, ndarray]，用户自定义 EDP（Y 方向），同上； None 时对每个 EDP 沿用 extra_edp 中的值
 
         列格式：TYPE-LOC-DIR（如 PID-1-1，PFA-0-1，PFV-0-1）。
 
@@ -513,6 +717,41 @@ class PelicunLossAssessment:
             columns.append('1-SA-0-1')
             units.append('g')
 
+        # 地面峰值速度 PGV：若提供则写入 demand.csv（地面层 loc=0，单位 mps）
+        pgv_x_arr = None
+        pgv_y_arr = None
+        if max_pgv is not None:
+            pgv_x_arr = np.asarray(max_pgv, dtype=float)
+            pgv_y_arr = (np.asarray(max_pgv_y, dtype=float)
+                         if max_pgv_y is not None else pgv_x_arr)
+            columns.append('1-PGV-0-1')
+            units.append('mps')
+            columns.append('1-PGV-0-2')
+            units.append('mps')
+
+        # 用户自定义额外 EDP（来自 IDA ExtraEDP 参数）
+        _extra_edp_data: list = []   # list of (edp_name, x_2d, y_2d)
+        if extra_edp:
+            _extra_y_src = extra_edp_y if extra_edp_y else {}
+            for _edp_name, _edp_arr_x in extra_edp.items():
+                _x_2d = np.asarray(_edp_arr_x, dtype=float)
+                _y_src = _extra_y_src.get(_edp_name, _edp_arr_x)
+                _y_2d = np.asarray(_y_src, dtype=float)
+                # 统一变为 2D：(n_records, M)
+                if _x_2d.ndim == 1:
+                    _x_2d = _x_2d[:, np.newaxis]
+                if _y_2d.ndim == 1:
+                    _y_2d = _y_2d[:, np.newaxis]
+                _n_locs = _x_2d.shape[1]
+                _unit = _EDP_DEMAND_UNIT.get(_edp_name.upper(), 'unitless')
+                for _i in range(_n_locs):
+                    columns.append(f'1-{_edp_name}-{_i + 1}-1')
+                    units.append(_unit)
+                for _i in range(_n_locs):
+                    columns.append(f'1-{_edp_name}-{_i + 1}-2')
+                    units.append(_unit)
+                _extra_edp_data.append((_edp_name, _x_2d, _y_2d))
+
         # 构建数据行（每条地震记录一行）
         data_rows = []
         for r in range(n_records):
@@ -527,6 +766,10 @@ class PelicunLossAssessment:
                 row += list(pfv_x_2d[r]) + list(pfv_y_2d[r])
             if sa_arr is not None:
                 row += [sa_arr[r]]
+            if pgv_x_arr is not None:
+                row += [pgv_x_arr[r], pgv_y_arr[r]]
+            for _, _x_2d, _y_2d in _extra_edp_data:
+                row += list(_x_2d[r]) + list(_y_2d[r])
             data_rows.append(row)
 
         demand_df = pd.DataFrame(
@@ -542,6 +785,7 @@ class PelicunLossAssessment:
         self,
         work_dir: Path,
         StructuralCmp: 'pd.DataFrame | None',
+        CustomComponents: 'pd.DataFrame | None' = None,
     ) -> str:
         """
         生成构件数量 CSV 文件（CMP_QNT 格式）并写入 work_dir/CMP_QNT.csv。
@@ -551,8 +795,9 @@ class PelicunLossAssessment:
 
         来源优先级：
         1. NormQtyPact 生成的非结构构件（需要 Windows + Excel）；
-        2. make_struct_cmp() 格式的结构构件。
-        若两者均不可用，写入一个占位行以避免 pelicun 因空资产模型报错。
+        2. make_struct_cmp() 格式的结构构件；
+        3. make_custom_cmp() 格式的自定义构件（量定义部分）。
+        若三者均不可用，写入一个占位行以避免 pelicun 因空资产模型报错。
 
         返回 CSV 文件的绝对路径字符串。
         """
@@ -585,6 +830,16 @@ class PelicunLossAssessment:
                 ],
             }, index=pd.Index(StructuralCmp['cmp'].values)))
 
+        # 自定义构件：make_custom_cmp 格式 → CMP_QNT 格式（仅量定义部分）
+        if CustomComponents is not None and len(CustomComponents) > 0:
+            cmp_parts.append(pd.DataFrame({
+                'Units':     CustomComponents['Units'].values,
+                'Location':  CustomComponents['loc'].values,
+                'Direction': CustomComponents['dir'].values,
+                'Theta_0':   CustomComponents['qty'].values,
+                'Family':    ['N/A'] * len(CustomComponents),
+            }, index=pd.Index(CustomComponents['cmp'].values)))
+
         cmp_df = pd.concat(cmp_parts) if cmp_parts else pd.DataFrame(
             {'Units': ['ea'], 'Location': ['1'], 'Direction': ['1'],
              'Theta_0': [0.0], 'Family': ['N/A']},
@@ -593,6 +848,108 @@ class PelicunLossAssessment:
         cmp_csv = str(work_dir / 'CMP_QNT.csv')
         cmp_df.to_csv(cmp_csv)
         return cmp_csv
+
+    def _build_custom_cmp_db(
+        self,
+        work_dir: Path,
+        custom_cmp_df: pd.DataFrame,
+    ) -> 'tuple[str, str]':
+        """
+        将 make_custom_cmp() 生成的自定义构件 DataFrame 写入 Pelicun 格式的
+        fragility 和 repair consequence CSV 文件（仅包含自定义构件行）。
+
+        pelicun 3.9+ 支持叠加数据库：通过同时设置 ComponentDatabase='FEMA P-58'
+        和 ComponentDatabasePath 指向本文件，pelicun 会将两者合并加载。
+        因此无需手动读取或合并 FEMA P-58 基础数据库。
+
+        返回 (custom_fragility_csv_path, custom_consequence_repair_csv_path)。
+        """
+        # ── 对每个唯一 cmp_id，仅取第一行定义的易损性/后果参数（要求一致性）──
+        seen_ids = {}
+        for _, row in custom_cmp_df.iterrows():
+            cid = row['cmp']
+            if cid not in seen_ids:
+                seen_ids[cid] = row
+
+        # ── 构建自定义 fragility CSV ──────────────────────────────────────
+        frag_max_ds = max(len(row['frag_theta_0']) for row in seen_ids.values())
+        frag_cols = ['Incomplete', 'Demand-Type', 'Demand-Unit', 'Demand-Offset', 'Demand-Directional']
+        for ds_i in range(1, frag_max_ds + 1):
+            frag_cols += [f'LS{ds_i}-Family', f'LS{ds_i}-Theta_0', f'LS{ds_i}-Theta_1', f'LS{ds_i}-DamageStateWeights']
+
+        frag_rows = {}
+        for cid, row in seen_ids.items():
+            edp = row['edp_type'].upper()
+            demand_type = _EDP_DEMAND_TYPE.get(edp, edp)
+            demand_unit = _EDP_DEMAND_UNIT.get(edp, 'unitless')
+            frag_row: dict = {
+                'Incomplete':         0,
+                'Demand-Type':        demand_type,
+                'Demand-Unit':        demand_unit,
+                'Demand-Offset':      int(row['demand_offset']),
+                'Demand-Directional': int(row['demand_directional']),
+            }
+            thetas_0 = row['frag_theta_0']
+            thetas_1 = row['frag_theta_1']
+            for ds_i, (t0, t1) in enumerate(zip(thetas_0, thetas_1), start=1):
+                frag_row[f'LS{ds_i}-Family']  = 'lognormal'
+                frag_row[f'LS{ds_i}-Theta_0'] = float(t0)
+                frag_row[f'LS{ds_i}-Theta_1'] = float(t1)
+            frag_rows[cid] = frag_row
+
+        custom_frag = pd.DataFrame(frag_rows).T
+        custom_frag.index.name = 'ID'
+        for col in frag_cols:
+            if col not in custom_frag.columns:
+                custom_frag[col] = np.nan
+        custom_frag = custom_frag[frag_cols]
+
+        custom_frag_path = str(work_dir / 'custom_fragility.csv')
+        custom_frag.to_csv(custom_frag_path)
+
+        # ── 构建自定义 repair consequence CSV ─────────────────────────────
+        repair_max_ds = max(len(row['cost_theta_0']) for row in seen_ids.values())
+        repair_cols = ['Incomplete', 'Quantity-Unit', 'DV-Unit']
+        for ds_i in range(1, repair_max_ds + 1):
+            repair_cols += [f'DS{ds_i}-Family', f'DS{ds_i}-Theta_0', f'DS{ds_i}-Theta_1', f'DS{ds_i}-LongLeadTime']
+
+        repair_rows = {}
+        for cid, row in seen_ids.items():
+            cost_t0 = row['cost_theta_0']
+            cost_t1 = row['cost_theta_1']
+            time_t0 = row['time_theta_0']
+            time_t1 = row['time_theta_1']
+            qty_unit = str(row.get('Units', 'ea')).upper()
+
+            for dv, t0_list, t1_list, dv_unit in [
+                ('Cost', cost_t0, cost_t1, 'USD_2011'),
+                ('Time', time_t0, time_t1, 'worker_day'),
+            ]:
+                r: dict = {
+                    'Incomplete':    0,
+                    'Quantity-Unit': f'1 {qty_unit}',
+                    'DV-Unit':       dv_unit,
+                }
+                for ds_i, (t0, t1) in enumerate(zip(t0_list, t1_list), start=1):
+                    r[f'DS{ds_i}-Family']  = 'lognormal' if float(t1) > 0 else 'deterministic'
+                    r[f'DS{ds_i}-Theta_0'] = float(t0)
+                    if float(t1) > 0:
+                        r[f'DS{ds_i}-Theta_1'] = float(t1)
+                    if dv == 'Time':
+                        r[f'DS{ds_i}-LongLeadTime'] = 0
+                repair_rows[f'{cid}-{dv}'] = r
+
+        custom_repair = pd.DataFrame(repair_rows).T
+        custom_repair.index.name = 'ID'
+        for col in repair_cols:
+            if col not in custom_repair.columns:
+                custom_repair[col] = np.nan
+        custom_repair = custom_repair[repair_cols]
+
+        custom_repair_path = str(work_dir / 'custom_consequence_repair.csv')
+        custom_repair.to_csv(custom_repair_path)
+
+        return custom_frag_path, custom_repair_path
 
     def _build_dl_config(
         self,
@@ -607,6 +964,8 @@ class PelicunLossAssessment:
         collapse_median: 'float | None',
         collapse_logstd: float,
         print_log: bool,
+        custom_fragility_db: 'str | None' = None,
+        custom_repair_db: 'str | None' = None,
     ) -> str:
         """
         生成 Pelicun JSON 配置文件并写入 work_dir/DL_config.json。
@@ -619,6 +978,8 @@ class PelicunLossAssessment:
         - 当 collapse_median 不为 None 时，写入 ``CollapseFragility``（以 SA 为
           需求类型）。本封装的 collapse_median 输入单位为 g；pelicun 在
           ``length=m`` 配置下要求 SA 容量使用 m/s^2，因此写入配置前需要转换。
+        - 当 custom_fragility_db / custom_repair_db 不为 None 时，在 'FEMA P-58' 基础上额外指定 ComponentDatabasePath / ConsequenceDatabasePath，
+          pelicun 3.9+ 会将两者叠加加载（无需手动合并）。
 
         返回 JSON 文件的绝对路径字符串。
         """
@@ -647,10 +1008,20 @@ class PelicunLossAssessment:
                 'Theta_1':              float(collapse_logstd),
             }
 
+        # pelicun 3.9+ 支持叠加：ComponentDatabase='FEMA P-58' 同时指定
+        # ComponentDatabasePath，两者会合并加载，无需手动合并 CSV
+        asset_db_cfg: dict = {'ComponentDatabase': 'FEMA P-58'}
+        if custom_fragility_db is not None:
+            asset_db_cfg['ComponentDatabasePath'] = custom_fragility_db
+
+        repair_db_cfg: dict = {'ConsequenceDatabase': 'FEMA P-58'}
+        if custom_repair_db is not None:
+            repair_db_cfg['ConsequenceDatabasePath'] = custom_repair_db
+
         repair_cfg: dict = {
-            'ConsequenceDatabase': 'FEMA P-58',
-            'MapApproach':         'Automatic',
-            'DecisionVariables':   {'Cost': True, 'Time': True},
+            **repair_db_cfg,
+            'MapApproach':       'Automatic',
+            'DecisionVariables': {'Cost': True, 'Time': True},
         }
 
         dl_config: dict = {
@@ -661,7 +1032,7 @@ class PelicunLossAssessment:
                 'Demands': demands_cfg,
                 'Asset': {
                     'ComponentAssignmentFile': cmp_csv,
-                    'ComponentDatabase':       'FEMA P-58',
+                    **asset_db_cfg,
                     'NumberOfStories':         str(num_stories),
                     'OccupancyType':           self.OccupancyType[0],
                 },

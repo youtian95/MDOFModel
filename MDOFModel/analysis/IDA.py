@@ -23,6 +23,12 @@ from tqdm import tqdm
 from ..models import MDOFOpenSees as mops
 from . import ReadRecord
 
+# IDA CSV 中固定存在的非自定义 EDP 列名集合
+_IDA_STANDARD_COLS = frozenset({
+    'IM', 'EQRecord', 'MaxDrift', 'MaxAbsAccel', 'MaxRelativeAccel',
+    'MaxAbsVel', 'ResDrift', 'PGV', 'Iffinish', 'tCurrent', 'TotalTime',
+})
+
 class IDAModelProtocol(Protocol):
     UniqueRecorderPrefix: str
     MaxDrift: list
@@ -35,7 +41,7 @@ class IDAModelProtocol(Protocol):
     def DynamicAnalysis(self, record_file: str, scale_factor: float, ifprint: bool, delta_t) -> Tuple[bool, float, float]:
         ...
 
-def IDA_1record(FEModel:IDAModelProtocol, IM_list:list, EQRecordfile:str, period:float, DeltaT = 'AsInRecord', _status_queue=None):
+def IDA_1record(FEModel:IDAModelProtocol, IM_list:list, EQRecordfile:str, period:float, DeltaT = 'AsInRecord', _status_queue=None, ExtraEDP=None):
     """对单条地震动记录运行 IDA（增量动力分析）。
 
     Parameters
@@ -52,6 +58,11 @@ def IDA_1record(FEModel:IDAModelProtocol, IM_list:list, EQRecordfile:str, period
         动力分析的时间步长。使用 'AsInRecord' 以直接采用记录的步长。
     _status_queue : multiprocessing.Queue, optional
         多进程模式下传入的状态队列，用于向主进程上报 IM 进度与收敛信息。
+    ExtraEDP : dict, optional
+        自定义 EDP 配置，格式为 ``{'EDP类型名': '模型属性名'}``。
+        例如 ``{'STRAIN': 'MaxColStrain'}`` 会在分析后读取
+        ``FEModel.MaxColStrain`` 的值，以 ``STRAIN`` 列名写入 IDA 结果。
+        属性值可以是标量（float）或列表（按楼层排列）。
 
     Returns
     -------
@@ -78,6 +89,13 @@ def IDA_1record(FEModel:IDAModelProtocol, IM_list:list, EQRecordfile:str, period
     record = eqsig.AccSignal(Accel * 9.8, dt)
     record.generate_response_spectrum(response_times=np.array([period]))
     SA = record.s_a[0]/9.8
+
+    # 计算原始（未缩放）记录的地面峰值速度 (PGV，m/s)
+    _accel_ms2 = Accel * 9.8
+    _vel = np.zeros(len(_accel_ms2))
+    if len(_accel_ms2) > 1:
+        _vel[1:] = np.cumsum((_accel_ms2[:-1] + _accel_ms2[1:]) * 0.5 * dt)
+    PGV_original = float(np.max(np.abs(_vel)))  # m/s，未缩放
 
     # 单进程模式下显示 IM 内层进度条；多进程模式下通过队列上报
     n_im = len(IM_list)
@@ -124,12 +142,23 @@ def IDA_1record(FEModel:IDAModelProtocol, IM_list:list, EQRecordfile:str, period
         data = {'IM':IM,'EQRecord':EQRecordfile,'MaxDrift':[FEModel.MaxDrift],
             'MaxAbsAccel':[FEModel.MaxAbsAccel],'MaxRelativeAccel':[FEModel.MaxRelativeAccel],
             'MaxAbsVel':[getattr(FEModel, 'MaxAbsVel', [])],
+            'PGV': PGV_original * (IM / SA) if SA > 0 else 0.0,
             'ResDrift':FEModel.ResDrift,'Iffinish':bool(Iffinish), 'tCurrent':tCurrent, 'TotalTime':TotalTime}
+        # 追加用户自定义 EDP 列
+        if ExtraEDP:
+            for _edp_name, _attr_name in ExtraEDP.items():
+                _val = getattr(FEModel, _attr_name, None)
+                if _val is None:
+                    data[_edp_name] = float('nan')
+                elif hasattr(_val, '__len__') and not isinstance(_val, str):
+                    data[_edp_name] = [list(_val)]
+                else:
+                    data[_edp_name] = float(_val)
         IDA_result=pd.concat([IDA_result,pd.DataFrame(data)], ignore_index=True)
 
     return IDA_result
 
-def IDA_f(FEModel:IDAModelProtocol, IM_list:list, period:float, EQRecordfile_list:list=None, DeltaT = 'AsInRecord', NumPool = 1):
+def IDA_f(FEModel:IDAModelProtocol, IM_list:list, period:float, EQRecordfile_list:list=None, DeltaT = 'AsInRecord', NumPool = 1, ExtraEDP=None):
     """可并行对多条记录进行 IDA 分析。
 
     Parameters
@@ -146,6 +175,8 @@ def IDA_f(FEModel:IDAModelProtocol, IM_list:list, period:float, EQRecordfile_lis
         动力分析的时间步长。
     NumPool : int, optional
         工作进程数。设为 1 时串行执行。
+    ExtraEDP : dict, optional
+        自定义 EDP 配置，格式同 ``IDA_1record`` 的 ``ExtraEDP`` 参数。
 
     Returns
     -------
@@ -171,7 +202,7 @@ def IDA_f(FEModel:IDAModelProtocol, IM_list:list, period:float, EQRecordfile_lis
     if NumPool == 1:
         for EQRecordfile in tqdm(EQRecordfile_list, desc='IDA', unit='record', total=total):
             FEModel_ = copy.deepcopy(FEModel)
-            IDA_1RecordResult = IDA_1record(FEModel_,IM_list,EQRecordfile,period,DeltaT)
+            IDA_1RecordResult = IDA_1record(FEModel_,IM_list,EQRecordfile,period,DeltaT, ExtraEDP=ExtraEDP)
             IDA_result=pd.concat([IDA_result,IDA_1RecordResult], ignore_index=True)
     else:
         with mp.Manager() as manager:
@@ -223,7 +254,8 @@ def IDA_f(FEModel:IDAModelProtocol, IM_list:list, period:float, EQRecordfile_lis
             with mp.Pool(NumPool) as pool:
                 futures = [
                     pool.apply_async(IDA_1record,
-                        args=(copy.deepcopy(FEModel), IM_list, EQRecordfile, period, DeltaT, status_queue))
+                        args=(copy.deepcopy(FEModel), IM_list, EQRecordfile, period, DeltaT, status_queue),
+                        kwds={'ExtraEDP': ExtraEDP})
                     for EQRecordfile in EQRecordfile_list
                 ]
                 with tqdm(total=total, desc='IDA', unit='record', position=0) as pbar:
@@ -352,6 +384,22 @@ def interp_edp_from_ida(
     """
     Extract EDP samples from IDA results at a target IM using per-record
     linear interpolation between adjacent IM levels.
+
+    Returns
+    -------
+    tuple
+        ``(drift_mat, accel_mat, res_arr, vel_mat, pgv_arr, extra_dict)``
+
+        - **drift_mat** ``(n_records, N)`` – 最大层间位移角。
+        - **accel_mat** ``(n_records, N+1)`` – 峰值楼面加速度（单位 g），
+          第 0 列为地面加速度（= IM × 0.4）。
+        - **res_arr** ``(n_records,)`` – 残余层间位移角。
+        - **vel_mat** ``(n_records, N+1)`` – 峰值楼面速度（单位 m/s）。
+        - **pgv_arr** ``(n_records,)`` or None – 峰值地面速度（单位 m/s）；
+          IDA CSV 中无 ``PGV`` 列时为 None。
+        - **extra_dict** ``dict[str, ndarray]`` – 用户自定义 EDP 插值结果，
+          键为 EDP 名称，值形状为 ``(n_records,)`` 或 ``(n_records, M)``；
+          无自定义 EDP 时为空字典。
     """
     N = int(num_stories)
     if isinstance(ida_csv, pd.DataFrame):
@@ -374,10 +422,21 @@ def interp_edp_from_ida(
                 arr = _parse_ida_array(val)
                 df.at[idx, col] = arr if arr.size != 1 else float(arr[0])
 
+    # 检测并解析额外的自定义 EDP 列（不在标准列集合中的列）
+    _extra_col_names = [col for col in df.columns if col not in _IDA_STANDARD_COLS]
+    for col in _extra_col_names:
+        for idx in df.index:
+            val = df.at[idx, col]
+            if isinstance(val, str):
+                arr = _parse_ida_array(val)
+                df.at[idx, col] = arr if arr.size != 1 else float(arr[0])
+
     drift_rows = []
     accel_rows = []
     res_rows = []
     vel_rows = []
+    pgv_rows = []
+    _extra_rows = {col: [] for col in _extra_col_names}
 
     for _, rows in df.groupby('EQRecord', sort=False):
         if rows.empty:
@@ -399,6 +458,15 @@ def interp_edp_from_ida(
             else:
                 vel_rows.append(np.concatenate([np.array([0.0]), vel[:N]]))
 
+        if 'PGV' in rows.columns:
+            pgv_rows.append(float(_interp_ida_value(rows, im_target, 'PGV')))
+
+        # 提取自定义 EDP 插值值
+        for col in _extra_col_names:
+            if col in rows.columns:
+                raw = _interp_ida_value(rows, im_target, col)
+                _extra_rows[col].append(np.asarray(raw, dtype=float))
+
     drift_mat = np.clip(np.array(drift_rows, dtype=float), 1e-8, None)
 
     accel_raw = np.clip(np.array(accel_rows, dtype=float), 1e-8, None)
@@ -413,7 +481,18 @@ def interp_edp_from_ida(
     else:
         vel_mat = np.full((len(drift_mat), N + 1), 10.0)
 
-    return drift_mat, accel_mat, res_arr, vel_mat
+    pgv_arr = np.clip(np.array(pgv_rows, dtype=float), 1e-8, None) if pgv_rows else None
+
+    # 整合额外 EDP 为字典
+    extra_dict = {}
+    for col, vals_list in _extra_rows.items():
+        if vals_list:
+            try:
+                extra_dict[col] = np.array(vals_list, dtype=float)
+            except (ValueError, TypeError):
+                pass
+
+    return drift_mat, accel_mat, res_arr, vel_mat, pgv_arr, extra_dict
 
 
 def read_IDA_results_csv(csv_file: Union[str, Path]) -> pd.DataFrame:
@@ -432,6 +511,18 @@ def read_IDA_results_csv(csv_file: Union[str, Path]) -> pd.DataFrame:
     }
     df = pd.read_csv(Path(csv_file), converters=converters)
     df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+    # 自动解析额外 EDP 列（非标准列中含 '[' 的字符串值解析为数组）
+    _skip_cols = frozenset(['IM', 'EQRecord', 'PGV', 'Iffinish', 'tCurrent', 'TotalTime', 'MaxDrift', 'MaxAbsAccel', 'MaxRelativeAccel', 'MaxAbsVel', 'ResDrift'])
+    for col in df.columns:
+        if col in _skip_cols:
+            continue
+        if df[col].dtype == object:
+            try:
+                df[col] = df[col].apply(
+                    lambda v: _parse_array_text(v) if isinstance(v, str) and '[' in v else v
+                )
+            except Exception:
+                pass
     return df
 
 
@@ -461,7 +552,7 @@ class IDAAnalysis():
         """
         self.FEModel = FEModel
 
-    def Analyze(self, IM_list:list, period:float=None, EQRecordfile_list:list=None, DeltaT = 'AsInRecord', NumPool = 1) -> pd.DataFrame:
+    def Analyze(self, IM_list:list, period:float=None, EQRecordfile_list:list=None, DeltaT = 'AsInRecord', NumPool = 1, ExtraEDP=None) -> pd.DataFrame:
         """执行当前模型的 IDA 分析并保存结果。
 
         Parameters
@@ -476,6 +567,10 @@ class IDAAnalysis():
             动力分析的时间步长。
         NumPool : int, optional
             用于并行处理的进程数。
+        ExtraEDP : dict, optional
+            自定义 EDP 配置，格式为 ``{'EDP类型名': '模型属性名'}``。
+            例如 ``{'STRAIN': 'MaxColStrain'}`` 会在每步 IDA 分析后
+            读取 ``FEModel.MaxColStrain`` 并以 ``STRAIN`` 列写入结果。
 
         Returns
         -------
@@ -488,7 +583,7 @@ class IDAAnalysis():
             else:
                 raise ValueError("Model must have a 'T1' property when period is not provided.")
 
-        self.IDA_result = IDA_f(self.FEModel, IM_list, period, EQRecordfile_list, DeltaT, NumPool)
+        self.IDA_result = IDA_f(self.FEModel, IM_list, period, EQRecordfile_list, DeltaT, NumPool, ExtraEDP=ExtraEDP)
         return self.IDA_result
 
     def SaveToCSV(self, OutputCSVFile: Union[str, Path]) -> None:

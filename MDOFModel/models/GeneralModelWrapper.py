@@ -85,6 +85,40 @@ class GeneralModelWrapper:
     T1: float = 0.0
     """float: 结构在指定自由度方向的第一阶基本平动周期，初始化时自动计算。当无法完成特征值屈曲分析时为 0.0。"""
 
+    extra_recorder_setup: Optional[Callable]
+    """
+    Optional[Callable[[Path], None]]: 用户自定义 recorder 的注册回调。
+
+    在每次 :meth:`DynamicAnalysis` 的标准 recorder 创建完成后调用，参数为当次分析的
+    唯一临时目录 ``tmp_dir: Path``。在此回调内可使用任意 ``ops.recorder(...)`` 命令，
+    输出文件应放入 ``tmp_dir`` 以保证多进程安全。
+    若为 ``None`` （默认）则不执行任何额外操作。
+
+    示例::
+
+        def setup(tmp_dir):
+            ops.recorder('EnvelopeElement', '-file', str(tmp_dir / 'strain.out'), '-ele', 101, 'section', 1, 'fiber', 0, 0, 'strain')
+        wrapper.extra_recorder_setup = setup
+    """
+
+    extra_post_process: Optional[Callable]
+    """
+    Optional[Callable[[GeneralModelWrapper, Path], None]]: 自定义 EDP 后处理回调。
+    
+    在 ``ops.wipe()`` 和标准 :meth:`_post_process` 完成后调用，参数为 ``(self, tmp_dir)``。
+    在此回调内读取自定义 recorder 输出文件并将结果写入 ``self.xxx`` 属性，
+    之后即可通过 ``ExtraEDP={'EDP名': 'xxx'}`` 被 IDA 模块读取。
+    若为 ``None`` （默认）则不执行任何额外操作。
+
+    示例::
+
+        def post(model, tmp_dir):
+            import numpy as np
+            data = np.loadtxt(tmp_dir / 'strain.out')
+            model.MaxColStrain = [float(np.atleast_2d(data)[2, 0])]
+        wrapper.extra_post_process = post
+    """
+
     def __init__(self, build_model_func: Callable, floor_nodes: List[int], story_heights: List[float], dof: int = 1, base_nodes: Optional[List[int]] = None, g_factor: float = 9800.0):
         """
         Parameters
@@ -123,6 +157,10 @@ class GeneralModelWrapper:
         self.MaxRelativeVel = []
         self.ResDrift = []
         self.TotalWeight = 0.0
+
+        # 用户自定义 EDP 回调（默认不启用）
+        self.extra_recorder_setup = None
+        self.extra_post_process   = None
 
         # 自动计算基本周期
         ops.wipe()
@@ -265,6 +303,10 @@ class GeneralModelWrapper:
         if self._base_nodes:
             base_disp_file = _tmp_dir / "basedisp.out"
             ops.recorder("Node", "-file", base_disp_file.as_posix(), "-time", "-node", *self._base_nodes, "-dof", self._dof, "disp")
+
+        # 用户自定义 recorder（在标准 recorder 之后、分析开始之前注册）
+        if self.extra_recorder_setup is not None:
+            self.extra_recorder_setup(_tmp_dir)
         
         # 5. 瞬态分析设置 (可根据需要替换)
         ops.system("BandGeneral")
@@ -381,6 +423,10 @@ class GeneralModelWrapper:
         
         # 6. 后处理：从包络文件读取 EDP 最大值，从位移时程中计算漂移和残余漂移
         self._post_process(disp_file, abs_accel_env_file, rel_accel_env_file, abs_vel_env_file, rel_vel_env_file, base_disp_file)
+
+        # 用户自定义 EDP 后处理（读取自定义 recorder 文件并设置属性）
+        if self.extra_post_process is not None:
+            self.extra_post_process(self, _tmp_dir)
             
         return finished, tCurrent, totalTime
 

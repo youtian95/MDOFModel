@@ -39,7 +39,11 @@ import tempfile
 
 from . import ReadRecord as _ReadRecord_module
 from .IDA import IDAModelProtocol, _parse_ida_array, _interp_ida_value
-
+# IDA_3D CSV 中固定存在的非自定义 EDP 列名集合
+_IDA3D_STANDARD_COLS = frozenset({
+    'IM', 'EQRecord_X', 'EQRecord_Y',
+    'MaxDrift_X', 'MaxDrift_Y', 'MaxAbsAccel_X', 'MaxAbsAccel_Y', 'MaxAbsVel_X', 'MaxAbsVel_Y', 'PGV_X', 'PGV_Y', 'ResDrift_X', 'ResDrift_Y', 'Iffinish', 'Iffinish_X', 'Iffinish_Y', 'tCurrent_X', 'tCurrent_Y', 'TotalTime', '_pair',
+})
 
 # ─────────────────────────────────────────────────────────────── 工具函数
 
@@ -56,6 +60,22 @@ def _compute_sa(record_file: str, period: float) -> float:
     rec = eqsig.single.AccSignal(accel * 9.8, dt)
     rec.generate_response_spectrum(response_times=np.array([period]))
     return float(rec.s_a[0] / 9.8)
+
+
+def _compute_pgv(record_file: str) -> float:
+    """计算单条地震动记录的地面峰值速度（PGV，m/s），对加速度时程进行梯形积分。"""
+    with tempfile.NamedTemporaryFile(suffix='.dat', mode='w', delete=False) as _f:
+        _tmp_path = _f.name
+    try:
+        dt, _ = _ReadRecord_module.ReadRecord(record_file, _tmp_path)
+        accel_g = np.array(open(_tmp_path).read().split(), dtype=float)
+    finally:
+        Path(_tmp_path).unlink(missing_ok=True)
+    accel_ms2 = accel_g * 9.8
+    vel = np.zeros(len(accel_ms2))
+    if len(accel_ms2) > 1:
+        vel[1:] = np.cumsum((accel_ms2[:-1] + accel_ms2[1:]) * 0.5 * dt)
+    return float(np.max(np.abs(vel)))
 
 
 def _sa_geomean(record_x: str, record_y: str, period: float) -> tuple:
@@ -91,6 +111,7 @@ def _IDA3D_1record_pair(
     period: float,
     DeltaT='AsInRecord',
     _status_queue=None,
+    ExtraEDP=None,
 ) -> pd.DataFrame:
     """对一个地震动记录对（X 分量 + Y 分量）运行 3D IDA 分析。
 
@@ -130,6 +151,10 @@ def _IDA3D_1record_pair(
     record_name_Y = Path(EQRecordY).stem
 
     _, _, Sa_gm = _sa_geomean(EQRecordX, EQRecordY, period)
+
+    # 计算两分量原始（未缩放）PGV (m/s)
+    PGV_X_original = _compute_pgv(EQRecordX)
+    PGV_Y_original = _compute_pgv(EQRecordY)
 
     IDA_result = pd.DataFrame()
     n_im = len(IM_list)
@@ -196,6 +221,8 @@ def _IDA3D_1record_pair(
             'MaxAbsAccel_Y': [list(FEModel_Y.MaxAbsAccel)],
             'MaxAbsVel_X':   [list(getattr(FEModel_X, 'MaxAbsVel', []))],
             'MaxAbsVel_Y':   [list(getattr(FEModel_Y, 'MaxAbsVel', []))],
+            'PGV_X':         PGV_X_original * (IM / Sa_gm) if Sa_gm > 0 else 0.0,
+            'PGV_Y':         PGV_Y_original * (IM / Sa_gm) if Sa_gm > 0 else 0.0,
             'ResDrift_X':    _to_float(FEModel_X.ResDrift),
             'ResDrift_Y':    _to_float(FEModel_Y.ResDrift),
             'Iffinish':      Iffinish,
@@ -205,6 +232,19 @@ def _IDA3D_1record_pair(
             'tCurrent_Y':    tCurrent_Y,
             'TotalTime':     TotalTime,
         }
+        # 追加用户自定义 EDP 列（X 分量和 Y 分量）
+        if ExtraEDP:
+            for _edp_name, _attr_name in ExtraEDP.items():
+                _val_x = getattr(FEModel_X, _attr_name, None)
+                _val_y = getattr(FEModel_Y, _attr_name, None)
+                for _suffix, _val in [('_X', _val_x), ('_Y', _val_y)]:
+                    _col = _edp_name + _suffix
+                    if _val is None:
+                        data[_col] = float('nan')
+                    elif hasattr(_val, '__len__') and not isinstance(_val, str):
+                        data[_col] = [list(_val)]
+                    else:
+                        data[_col] = float(_val)
         IDA_result = pd.concat([IDA_result, pd.DataFrame(data)], ignore_index=True)
 
     return IDA_result
@@ -220,6 +260,7 @@ def _IDA3D_f(
     EQRecordfile_pair_list: list = None,
     DeltaT='AsInRecord',
     NumPool: int = 1,
+    ExtraEDP=None,
 ) -> pd.DataFrame:
     """对多个地震动记录对并行执行 3D IDA 分析。
 
@@ -278,7 +319,7 @@ def _IDA3D_f(
     if NumPool == 1:
         for eq_x, eq_y in tqdm(EQRecordfile_pair_list, desc='IDA 3D', unit='pair', total=total):
             FEModel_ = copy.deepcopy(FEModel)
-            result   = _IDA3D_1record_pair(FEModel_, IM_list, eq_x, eq_y, period, DeltaT)
+            result   = _IDA3D_1record_pair(FEModel_, IM_list, eq_x, eq_y, period, DeltaT, ExtraEDP=ExtraEDP)
             IDA_result = pd.concat([IDA_result, result], ignore_index=True)
     else:
         with mp.Manager() as manager:
@@ -331,6 +372,7 @@ def _IDA3D_f(
                     pool.apply_async(
                         _IDA3D_1record_pair,
                         args=(copy.deepcopy(FEModel), IM_list, eq_x, eq_y, period, DeltaT, status_queue),
+                        kwds={'ExtraEDP': ExtraEDP},
                     )
                     for eq_x, eq_y in EQRecordfile_pair_list
                 ]
@@ -366,6 +408,17 @@ def _read_IDA3D_results_csv(csv_file: Union[str, Path]) -> pd.DataFrame:
     converters = {col: _parse for col in array_cols}
     df = pd.read_csv(Path(csv_file), converters=converters)
     df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+    # 自动解析额外 EDP 列（非标准列中含 '[' 的字符串值解析为数组）
+    for col in df.columns:
+        if col in _IDA3D_STANDARD_COLS:
+            continue
+        if df[col].dtype == object:
+            try:
+                df[col] = df[col].apply(
+                    lambda v: _parse(v) if isinstance(v, str) and '[' in v else v
+                )
+            except Exception:
+                pass
     return df
 
 
@@ -431,8 +484,18 @@ def interp_edp_from_ida_3D(
     accel_X_rows, accel_Y_rows = [], []
     res_X_rows,   res_Y_rows   = [], []
     vel_X_rows,   vel_Y_rows   = [], []
+    pgv_X_rows,   pgv_Y_rows   = [], []
+
+    # 检测额外自定义 EDP 列（以 _X 后缀且不在标准列集合中）
+    _extra_base_names = [
+        col[:-2] for col in df.columns
+        if col not in _IDA3D_STANDARD_COLS and col.endswith('_X')
+    ]
+    _extra_x_rows = {name: [] for name in _extra_base_names}
+    _extra_y_rows = {name: [] for name in _extra_base_names}
 
     has_vel = 'MaxAbsVel_X' in df.columns and 'MaxAbsVel_Y' in df.columns
+    has_pgv = 'PGV_X' in df.columns and 'PGV_Y' in df.columns
 
     df['_pair'] = df['EQRecord_X'].astype(str) + '|' + df['EQRecord_Y'].astype(str)
     for _, rows in df.groupby('_pair', sort=False):
@@ -479,6 +542,21 @@ def interp_edp_from_ida_3D(
         vel_X_rows.append(vel_x)
         vel_Y_rows.append(vel_y)
 
+        if has_pgv:
+            pgv_X_rows.append(float(_interp_ida_value(rows, im_target, 'PGV_X')))
+            pgv_Y_rows.append(float(_interp_ida_value(rows, im_target, 'PGV_Y')))
+
+        # 提取自定义 EDP
+        for _name in _extra_base_names:
+            _col_x = _name + '_X'
+            _col_y = _name + '_Y'
+            if _col_x in rows.columns:
+                _extra_x_rows[_name].append(
+                    np.asarray(_interp_ida_value(rows, im_target, _col_x), dtype=float))
+            if _col_y in rows.columns:
+                _extra_y_rows[_name].append(
+                    np.asarray(_interp_ida_value(rows, im_target, _col_y), dtype=float))
+
     drift_X = np.clip(np.array(drift_X_rows, dtype=float), 1e-8, None)
     drift_Y = np.clip(np.array(drift_Y_rows, dtype=float), 1e-8, None)
     accel_X = np.clip(np.array(accel_X_rows, dtype=float), 1e-8, None)
@@ -488,7 +566,25 @@ def interp_edp_from_ida_3D(
     vel_X   = np.clip(np.array(vel_X_rows,   dtype=float), 1e-8, None)
     vel_Y   = np.clip(np.array(vel_Y_rows,   dtype=float), 1e-8, None)
 
-    return drift_X, drift_Y, accel_X, accel_Y, res_X, res_Y, vel_X, vel_Y
+    pgv_X = np.clip(np.array(pgv_X_rows, dtype=float), 1e-8, None) if pgv_X_rows else None
+    pgv_Y = np.clip(np.array(pgv_Y_rows, dtype=float), 1e-8, None) if pgv_Y_rows else None
+
+    extra_x_dict: dict = {}
+    extra_y_dict: dict = {}
+    for _name, _vals in _extra_x_rows.items():
+        if _vals:
+            try:
+                extra_x_dict[_name] = np.array(_vals, dtype=float)
+            except (ValueError, TypeError):
+                pass
+    for _name, _vals in _extra_y_rows.items():
+        if _vals:
+            try:
+                extra_y_dict[_name] = np.array(_vals, dtype=float)
+            except (ValueError, TypeError):
+                pass
+
+    return drift_X, drift_Y, accel_X, accel_Y, res_X, res_Y, vel_X, vel_Y, pgv_X, pgv_Y, extra_x_dict, extra_y_dict
 
 
 # ──────────────────────────────────────────────── 2D 包络转换（Hazus 兼容）
@@ -659,6 +755,7 @@ class IDA3DAnalysis:
         EQRecordfile_pair_list: list = None,
         DeltaT='AsInRecord',
         NumPool: int = 1,
+        ExtraEDP=None,
     ) -> pd.DataFrame:
         """执行 3D IDA 分析并保存结果。
 
@@ -675,6 +772,11 @@ class IDA3DAnalysis:
             动力分析时间步长。
         NumPool : int, optional
             并行进程数，设为 1 时串行执行。
+        ExtraEDP : dict, optional
+            自定义 EDP 配置，格式为 ``{'EDP类型名': '模型属性名'}``。
+            例如 ``{'STRAIN': 'MaxColStrain'}`` 会分别读取
+            ``FEModel_X.MaxColStrain`` 和 ``FEModel_Y.MaxColStrain``，
+            并以 ``STRAIN_X`` 和 ``STRAIN_Y`` 列写入结果。
 
         Returns
         -------
@@ -689,7 +791,7 @@ class IDA3DAnalysis:
 
         self.IDA_result = _IDA3D_f(
             self.FEModel, IM_list, period,
-            EQRecordfile_pair_list, DeltaT, NumPool,
+            EQRecordfile_pair_list, DeltaT, NumPool, ExtraEDP=ExtraEDP,
         )
         return self.IDA_result
 
