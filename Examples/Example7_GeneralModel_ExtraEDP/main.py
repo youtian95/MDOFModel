@@ -29,8 +29,9 @@ Example 7 — 6 层钢矩形框架：自定义 EDP（柱截面应变）IDA 与 P
 
 并行说明
 --------
-``extra_recorder_setup`` / ``extra_post_process`` 定义在独立模块
-``mrf_strain_callbacks.py`` 中，可被 Python ``multiprocessing`` spawn 模式
+``extra_recorder_setup`` / ``extra_post_process`` 使用模块顶层定义的可调用 dataclass
+（``ColStrainRecorder`` / ``ColStrainPostProcess``）实现。定义在模块顶层，没有放在
+``if __name__ == '__main__':`` 块内，Python ``multiprocessing`` spawn 模式对它们可
 正确 pickle，因此 ``NumPool > 1`` 的并行 IDA 完全受支持。
 
 ``tmp_dir``（= ``TmpDir/opensees_{UniqueRecorderPrefix}``）在每条地震波记录
@@ -39,7 +40,8 @@ Example 7 — 6 层钢矩形框架：自定义 EDP（柱截面应变）IDA 与 P
 
 from pathlib import Path
 import sys
-
+from dataclasses import dataclass
+import openseespy.opensees as ops
 import numpy as np
 import pandas as pd
 
@@ -48,9 +50,6 @@ if _examples_dir not in sys.path:
     sys.path.insert(0, _examples_dir)
 
 from Example_MRF_Model import build_model  # 6 层 MRF 建模函数（不含 ops.wipe）
-
-# 柱应变 ExtraEDP 回调（独立模块，支持 multiprocessing pickle → 可并行）
-from mrf_strain_callbacks import setup_strain_recorders, read_strain_results, COL_ELEMENTS, COL_HALF_D
 
 from MDOFModel.models.GeneralModelWrapper import GeneralModelWrapper
 from MDOFModel.analysis.IDA_3D import IDA3DAnalysis
@@ -77,7 +76,48 @@ BASE_NODES    = [1, 2, 3, 4, 5]
 # 层高 (mm)，由 Y_COORDS = [0, 5000, 9000, 13000, 17000, 21000, 25000] 差分
 STORY_HEIGHTS = [5000, 4000, 4000, 4000, 4000, 4000]
 
-# COL_ELEMENTS / COL_HALF_D 已定义在 mrf_strain_callbacks.py，从那里导入。
+# ── 柱应变 recorder 参数 ──────────────────────────────────────────────────
+COL_ELEMENTS = (10103, 10203, 10303, 10403, 10503, 10603)  # 各层代表性中柱单元编号
+COL_HALF_D   = (325.0, 325.0, 275.0, 225.0, 225.0, 225.0) # 截面半高 d/2 (mm)
+
+
+@dataclass(frozen=True)
+class ColStrainRecorder:
+    """EnvelopeElement 截面变形 recorder 注册器（模块顶层定义，支持 pickle）。"""
+
+    element_tags: tuple[int, ...]
+
+    def __call__(self, tmp_dir: Path) -> None:
+        for i, ele_tag in enumerate(self.element_tags):
+            ops.recorder(
+                'EnvelopeElement', '-file',
+                str(tmp_dir / f'col_deform_{i}.out'),
+                '-ele', ele_tag, 'section', 1, 'deformation',
+            )
+
+
+@dataclass(frozen=True)
+class ColStrainPostProcess:
+    """EnvelopeElement 包络结果读取器（模块顶层定义，支持 pickle）。
+
+    极端纤维应变估算： ``ε_extreme ≈ |ε_axial|_absMax + |κ|_absMax × (d/2)``
+    """
+
+    half_d: tuple[float, ...]  # 各层截面半高 d/2 (mm)
+
+    def __call__(self, model, tmp_dir: Path) -> None:
+        strains = []
+        for i, hd in enumerate(self.half_d):
+            try:
+                arr = np.atleast_2d(np.loadtxt(tmp_dir / f'col_deform_{i}.out'))
+                strains.append(
+                    float(arr[2, 0]) + float(arr[2, 1]) * hd
+                    if arr.shape[0] >= 3 and arr.shape[1] >= 2
+                    else float('nan')
+                )
+            except Exception:
+                strains.append(float('nan'))
+        model.MaxColStrain = strains
 
 # ── 输出目录 ──────────────────────────────────────────────────────────────────
 OUT_DIR = Path(__file__).resolve().parent / 'Output'
@@ -87,7 +127,9 @@ IDA_CSV      = OUT_DIR / 'IDA_results.csv'
 FILTERED_CSV = OUT_DIR / 'IDA_results_filtered.csv'
 
 
-# 回调函数 setup_strain_recorders / read_strain_results 来自 mrf_strain_callbacks
+# 回调实例（模块顶层，将被并行工作进程 pickle）
+_col_strain_recorder     = ColStrainRecorder(COL_ELEMENTS)
+_col_strain_post_process = ColStrainPostProcess(COL_HALF_D)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 构件定义
@@ -146,8 +188,8 @@ if __name__ == '__main__':
         dof              = 1,
     )
     # 挂载柱应变 recorder 回调（在标准 recorder 注册完毕后追加）
-    wrapper.extra_recorder_setup = setup_strain_recorders
-    wrapper.extra_post_process   = read_strain_results
+    wrapper.extra_recorder_setup = _col_strain_recorder
+    wrapper.extra_post_process   = _col_strain_post_process
     print(f'  基本周期 T1 = {wrapper.T1:.3f} s')
 
     # ── Step 2：选取前 5 对 FEMA P-695 远场记录（X/Y 分量对）────────────────

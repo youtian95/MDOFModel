@@ -112,6 +112,7 @@ def _IDA3D_1record_pair(
     DeltaT='AsInRecord',
     _status_queue=None,
     ExtraEDP=None,
+    _main_pbar=None,
 ) -> pd.DataFrame:
     """对一个地震动记录对（X 分量 + Y 分量）运行 3D IDA 分析。
 
@@ -210,6 +211,9 @@ def _IDA3D_1record_pair(
                     f"X={'OK' if Iffinish_X else 'FAIL'} "
                     f"Y={'OK' if Iffinish_Y else 'FAIL'}"
                 )
+
+        if _main_pbar is not None:
+            _main_pbar.update(1)
 
         data = {
             'IM':            IM,
@@ -315,71 +319,78 @@ def _IDA3D_f(
     })
 
     total = len(EQRecordfile_pair_list)
+    n_im = len(IM_list)
+    total_sa = total * n_im
 
     if NumPool == 1:
-        for eq_x, eq_y in tqdm(EQRecordfile_pair_list, desc='IDA 3D', unit='pair', total=total):
-            FEModel_ = copy.deepcopy(FEModel)
-            result   = _IDA3D_1record_pair(FEModel_, IM_list, eq_x, eq_y, period, DeltaT, ExtraEDP=ExtraEDP)
-            IDA_result = pd.concat([IDA_result, result], ignore_index=True)
+        with tqdm(total=total_sa, desc='IDA 3D', unit='Sa', position=0) as pbar:
+            for eq_x, eq_y in EQRecordfile_pair_list:
+                FEModel_ = copy.deepcopy(FEModel)
+                result   = _IDA3D_1record_pair(FEModel_, IM_list, eq_x, eq_y, period, DeltaT,
+                                               ExtraEDP=ExtraEDP, _main_pbar=pbar)
+                IDA_result = pd.concat([IDA_result, result], ignore_index=True)
     else:
         with mp.Manager() as manager:
             status_queue = manager.Queue()
             stop_event   = threading.Event()
 
-            def _progress_display(queue, stop_event):
-                available_positions = list(range(1, NumPool + 1))
-                record_bars = {}
+            with tqdm(total=total_sa, desc='IDA 3D', unit='Sa', position=0) as pbar:
+                def _progress_display(queue, stop_event):
+                    available_positions = list(range(1, NumPool + 1))
+                    record_bars = {}
 
-                while not stop_event.is_set() or not queue.empty():
-                    try:
-                        msg        = queue.get(timeout=0.2)
-                        record     = msg['record']
-                        im_idx     = msg['im_idx']
-                        im_total   = msg['im_total']
+                    while not stop_event.is_set() or not queue.empty():
+                        try:
+                            msg        = queue.get(timeout=0.2)
+                            record     = msg['record']
+                            im_idx     = msg['im_idx']
+                            im_total   = msg['im_total']
 
-                        if record not in record_bars:
-                            pos = available_positions.pop(0) if available_positions else NumPool
-                            bar = tqdm(
-                                total=im_total,
-                                desc=f"  {record[:25]}",
-                                position=pos, leave=False, unit='IM',
-                                bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}]',
-                            )
-                            record_bars[record] = (bar, pos)
+                            if record not in record_bars:
+                                pos = available_positions.pop(0) if available_positions else NumPool
+                                bar = tqdm(
+                                    total=im_total,
+                                    desc=f"  {record[:25]}",
+                                    position=pos, leave=False, unit='IM',
+                                    bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}]',
+                                )
+                                record_bars[record] = (bar, pos)
 
-                        bar, pos = record_bars[record]
-                        bar.n = im_idx
-                        bar.refresh()
+                            bar, pos = record_bars[record]
+                            bar.n = im_idx
+                            bar.refresh()
 
-                        if im_idx >= im_total:
-                            bar.close()
-                            del record_bars[record]
-                            available_positions.append(pos)
-                            available_positions.sort()
-                    except Exception:
-                        pass
+                            # 每完成一个 IM 更新主进度条
+                            if im_idx > 0:
+                                pbar.update(1)
 
-                for bar, _ in list(record_bars.values()):
-                    bar.close()
+                            if im_idx >= im_total:
+                                bar.close()
+                                del record_bars[record]
+                                available_positions.append(pos)
+                                available_positions.sort()
+                        except Exception:
+                            pass
 
-            disp_thread = threading.Thread(
-                target=_progress_display, args=(status_queue, stop_event), daemon=True,
-            )
-            disp_thread.start()
+                    for bar, _ in list(record_bars.values()):
+                        bar.close()
 
-            with mp.Pool(NumPool) as pool:
-                futures = [
-                    pool.apply_async(
-                        _IDA3D_1record_pair,
-                        args=(copy.deepcopy(FEModel), IM_list, eq_x, eq_y, period, DeltaT, status_queue),
-                        kwds={'ExtraEDP': ExtraEDP},
-                    )
-                    for eq_x, eq_y in EQRecordfile_pair_list
-                ]
-                with tqdm(total=total, desc='IDA 3D', unit='pair', position=0) as pbar:
+                disp_thread = threading.Thread(
+                    target=_progress_display, args=(status_queue, stop_event), daemon=True,
+                )
+                disp_thread.start()
+
+                with mp.Pool(NumPool) as pool:
+                    futures = [
+                        pool.apply_async(
+                            _IDA3D_1record_pair,
+                            args=(copy.deepcopy(FEModel), IM_list, eq_x, eq_y, period, DeltaT, status_queue),
+                            kwds={'ExtraEDP': ExtraEDP},
+                        )
+                        for eq_x, eq_y in EQRecordfile_pair_list
+                    ]
                     for future in futures:
                         IDA_result = pd.concat([IDA_result, future.get()], ignore_index=True)
-                        pbar.update(1)
 
             stop_event.set()
             disp_thread.join(timeout=3.0)

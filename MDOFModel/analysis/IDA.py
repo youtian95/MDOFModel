@@ -41,7 +41,7 @@ class IDAModelProtocol(Protocol):
     def DynamicAnalysis(self, record_file: str, scale_factor: float, ifprint: bool, delta_t) -> Tuple[bool, float, float]:
         ...
 
-def IDA_1record(FEModel:IDAModelProtocol, IM_list:list, EQRecordfile:str, period:float, DeltaT = 'AsInRecord', _status_queue=None, ExtraEDP=None):
+def IDA_1record(FEModel:IDAModelProtocol, IM_list:list, EQRecordfile:str, period:float, DeltaT = 'AsInRecord', _status_queue=None, ExtraEDP=None, _main_pbar=None):
     """对单条地震动记录运行 IDA（增量动力分析）。
 
     Parameters
@@ -139,6 +139,9 @@ def IDA_1record(FEModel:IDAModelProtocol, IM_list:list, EQRecordfile:str, period
                     f"t={tCurrent:.2f}/{TotalTime:.2f}s"
                 )
 
+        if _main_pbar is not None:
+            _main_pbar.update(1)
+
         data = {'IM':IM,'EQRecord':EQRecordfile,'MaxDrift':[FEModel.MaxDrift],
             'MaxAbsAccel':[FEModel.MaxAbsAccel],'MaxRelativeAccel':[FEModel.MaxRelativeAccel],
             'MaxAbsVel':[getattr(FEModel, 'MaxAbsVel', [])],
@@ -198,70 +201,76 @@ def IDA_f(FEModel:IDAModelProtocol, IM_list:list, period:float, EQRecordfile_lis
         'MaxDrift':[],'MaxAbsAccel':[],'MaxRelativeAccel':[],'ResDrift':[],'Iffinish':[]})
 
     total = len(EQRecordfile_list)
+    n_im = len(IM_list)
+    total_sa = total * n_im
 
     if NumPool == 1:
-        for EQRecordfile in tqdm(EQRecordfile_list, desc='IDA', unit='record', total=total):
-            FEModel_ = copy.deepcopy(FEModel)
-            IDA_1RecordResult = IDA_1record(FEModel_,IM_list,EQRecordfile,period,DeltaT, ExtraEDP=ExtraEDP)
-            IDA_result=pd.concat([IDA_result,IDA_1RecordResult], ignore_index=True)
+        with tqdm(total=total_sa, desc='IDA', unit='Sa', position=0) as pbar:
+            for EQRecordfile in EQRecordfile_list:
+                FEModel_ = copy.deepcopy(FEModel)
+                IDA_1RecordResult = IDA_1record(FEModel_, IM_list, EQRecordfile, period, DeltaT, ExtraEDP=ExtraEDP, _main_pbar=pbar)
+                IDA_result = pd.concat([IDA_result, IDA_1RecordResult], ignore_index=True)
     else:
         with mp.Manager() as manager:
             status_queue = manager.Queue()
             stop_event = threading.Event()
 
-            def _progress_display(queue, stop_event):
-                # 为每个并发进程分配一个子进度条槽位 (position 1..NumPool)
-                available_positions = list(range(1, NumPool + 1))
-                record_bars = {}  # record_name -> (tqdm_bar, position)
+            with tqdm(total=total_sa, desc='IDA', unit='Sa', position=0) as pbar:
+                def _progress_display(queue, stop_event):
+                    # 为每个并发进程分配一个子进度条槽位 (position 1..NumPool)
+                    available_positions = list(range(1, NumPool + 1))
+                    record_bars = {}  # record_name -> (tqdm_bar, position)
 
-                while not stop_event.is_set() or not queue.empty():
-                    try:
-                        msg = queue.get(timeout=0.2)
-                        record = msg['record']
-                        im_idx  = msg['im_idx']
-                        im_total = msg['im_total']
+                    while not stop_event.is_set() or not queue.empty():
+                        try:
+                            msg = queue.get(timeout=0.2)
+                            record = msg['record']
+                            im_idx  = msg['im_idx']
+                            im_total = msg['im_total']
 
-                        # 首次出现：分配一个槽位并创建进度条
-                        if record not in record_bars:
-                            pos = available_positions.pop(0) if available_positions else NumPool
-                            bar = tqdm(total=im_total,
-                                       desc=f"  {record[:25]}",
-                                       position=pos, leave=False, unit='IM',
-                                       bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}]')
-                            record_bars[record] = (bar, pos)
+                            # 首次出现：分配一个槽位并创建进度条
+                            if record not in record_bars:
+                                pos = available_positions.pop(0) if available_positions else NumPool
+                                bar = tqdm(total=im_total,
+                                           desc=f"  {record[:25]}",
+                                           position=pos, leave=False, unit='IM',
+                                           bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}]')
+                                record_bars[record] = (bar, pos)
 
-                        bar, pos = record_bars[record]
-                        bar.n = im_idx
-                        bar.refresh()
+                            bar, pos = record_bars[record]
+                            bar.n = im_idx
+                            bar.refresh()
 
-                        # 该记录所有 IM 分析完毕：关闭进度条并释放槽位
-                        if im_idx >= im_total:
-                            bar.close()
-                            del record_bars[record]
-                            available_positions.append(pos)
-                            available_positions.sort()
+                            # 每完成一个 IM 更新主进度条
+                            if im_idx > 0:
+                                pbar.update(1)
 
-                    except Exception:
-                        pass
+                            # 该记录所有 IM 分析完毕：关闭进度条并释放槽位
+                            if im_idx >= im_total:
+                                bar.close()
+                                del record_bars[record]
+                                available_positions.append(pos)
+                                available_positions.sort()
 
-                for bar, _ in list(record_bars.values()):
-                    bar.close()
+                        except Exception:
+                            pass
 
-            disp_thread = threading.Thread(
-                target=_progress_display, args=(status_queue, stop_event), daemon=True)
-            disp_thread.start()
+                    for bar, _ in list(record_bars.values()):
+                        bar.close()
 
-            with mp.Pool(NumPool) as pool:
-                futures = [
-                    pool.apply_async(IDA_1record,
-                        args=(copy.deepcopy(FEModel), IM_list, EQRecordfile, period, DeltaT, status_queue),
-                        kwds={'ExtraEDP': ExtraEDP})
-                    for EQRecordfile in EQRecordfile_list
-                ]
-                with tqdm(total=total, desc='IDA', unit='record', position=0) as pbar:
+                disp_thread = threading.Thread(
+                    target=_progress_display, args=(status_queue, stop_event), daemon=True)
+                disp_thread.start()
+
+                with mp.Pool(NumPool) as pool:
+                    futures = [
+                        pool.apply_async(IDA_1record,
+                            args=(copy.deepcopy(FEModel), IM_list, EQRecordfile, period, DeltaT, status_queue),
+                            kwds={'ExtraEDP': ExtraEDP})
+                        for EQRecordfile in EQRecordfile_list
+                    ]
                     for future in futures:
                         IDA_result = pd.concat([IDA_result, future.get()], ignore_index=True)
-                        pbar.update(1)
 
             stop_event.set()
             disp_thread.join(timeout=3.0)
