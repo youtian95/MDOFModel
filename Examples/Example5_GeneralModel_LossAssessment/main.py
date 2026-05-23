@@ -27,7 +27,7 @@ examples_dir = str(Path(__file__).resolve().parent.parent)
 if examples_dir not in sys.path:
     sys.path.insert(0, examples_dir)
 
-from MDOFModel.analysis import IDA_3D
+from MDOFModel.analysis import IDA_2D
 from MDOFModel.loss.Tool_LossAssess import Simulate_losses_given_IM_basedon_IDA
 
 # ── 模型参数 ──────────────────────────────────────────────────────────────
@@ -59,7 +59,7 @@ if __name__ == '__main__':
     print('=' * 65)
 
     # ── Step 1：取双向包络，转为 Hazus 兼容的 2D 等效 DataFrame ──────────
-    ida_2d_envelope = IDA_3D.IDA3D_to_2d_envelope(IDA_CSV)
+    ida_2d_envelope = IDA_2D.IDA_bidir_to_envelope(IDA_CSV)
     print(f'  IDA 结果：{len(ida_2d_envelope)} 行（X/Y 包络后）')
     print(f'  目标 IM 列表 : {IM_LIST} g')
     print(f'  每 IM 模拟数 : {N_SIM[0]}')

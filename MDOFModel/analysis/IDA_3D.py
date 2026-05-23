@@ -21,6 +21,20 @@
 # 依赖库:
 #   openseespy, pandas, numpy, eqsig, tqdm
 ########################################################
+# .. deprecated::
+#    IDA_3D 已被 IDA_2D 取代。请改用 MDOFModel.analysis.IDA_2D，
+#    IDA_2D 同时支持单向与双向分析，并提供断点续算功能。
+#    IDA_3D 将在未来版本中移除。
+########################################################
+
+import warnings
+warnings.warn(
+    "MDOFModel.analysis.IDA_3D 已弃用，请改用 MDOFModel.analysis.IDA_2D。"
+    "IDA_2D 统一支持单向与双向分析，并提供断点续算功能。"
+    "IDA_3D 将在未来版本中移除。",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 from collections import Counter
 import copy

@@ -4,7 +4,7 @@ import sys
 import pandas as pd
 import numpy as np
 
-from MDOFModel.analysis import IDA
+from MDOFModel.analysis import IDA_2D as IDA
 from MDOFModel.analysis import Collapse
 from MDOFModel.models import MDOF_LU as mlu
 from MDOFModel.models import MDOFOpenSees as mops

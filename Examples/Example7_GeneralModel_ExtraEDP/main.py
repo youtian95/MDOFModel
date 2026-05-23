@@ -52,7 +52,7 @@ if _examples_dir not in sys.path:
 from Example_MRF_Model import build_model  # 6 层 MRF 建模函数（不含 ops.wipe）
 
 from MDOFModel.models.GeneralModelWrapper import GeneralModelWrapper
-from MDOFModel.analysis.IDA_3D import IDA3DAnalysis
+from MDOFModel.analysis.IDA_2D import IDAAnalysis
 from MDOFModel.loss.PelicunLossAssessment import PelicunLossAssessment
 from MDOFModel.analysis import Collapse
 
@@ -213,12 +213,12 @@ if __name__ == '__main__':
     # tmp_dir = TmpDir/opensees_{UniqueRecorderPrefix} 已保证各进程文件不冲突。
     # 3D IDA：对每对记录分别运行 X、Y 方向动力分析，IM 取两分量谱加速度的几何均值。
     print('\n[Step 3] 执行 3D IDA（2 个 IM × 5 对记录 × 2 方向 = 20 次动力分析）...')
-    ida = IDA3DAnalysis(wrapper)
+    ida = IDAAnalysis(wrapper)
     ida_result = ida.Analyze(
-        IM_list                  = IM_LIST,
-        EQRecordfile_pair_list   = pairs_5,
-        ExtraEDP                 = {'STRAIN': 'MaxColStrain'},
-        NumPool                  = 5,
+        IM_list  = IM_LIST,
+        records  = pairs_5,
+        ExtraEDP = {'STRAIN': 'MaxColStrain'},
+        NumPool  = 5,
     )
     ida.SaveToCSV(str(IDA_CSV))
     print(f'  3D IDA 完成，共 {len(ida_result)} 行结果 → {IDA_CSV.name}')

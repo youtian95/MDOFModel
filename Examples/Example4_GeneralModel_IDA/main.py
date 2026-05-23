@@ -9,7 +9,7 @@ examples_dir = str(Path(__file__).resolve().parent.parent)
 if examples_dir not in sys.path:
     sys.path.insert(0, examples_dir)
 
-from MDOFModel.analysis import IDA_3D
+from MDOFModel.analysis import IDA_2D
 from MDOFModel.analysis import Collapse
 from MDOFModel.models.GeneralModelWrapper import GeneralModelWrapper
 
@@ -39,8 +39,8 @@ if __name__ == '__main__':
     # 生成由 0.1g 到 3.0g 的10点长的一系列IM作为IDA输入（几何均值 Sa）
     IM_list = np.linspace(0.1, 3.0, 10).tolist()
     
-    IDA_obj = IDA_3D.IDA3DAnalysis(wrapper_model)
-    IDA_result = IDA_obj.Analyze(IM_list, NumPool=8)
+    IDA_obj = IDA_2D.IDAAnalysis(wrapper_model)
+    IDA_result = IDA_obj.Analyze(IM_list, records=IDA_2D.load_fema_records(bidir=True), NumPool=8)
 
     # 保存完整 3D IDA 结果（含倒塌记录，供倒塌分析使用）
     IDA_obj.SaveToCSV(CFDir/'IDA_results.csv')
@@ -54,4 +54,4 @@ if __name__ == '__main__':
     IDA_result_filtered = ca.filter_collapse()
     IDA_result_filtered.to_csv(CFDir/'IDA_results_filtered.csv', index=False, encoding='utf-8-sig')
 
-    IDA_3D.IDA3DAnalysis.plot_IDA_results(IDA_result, Stat=True, FigName=CFDir/'IDA.jpg')
+    IDA_2D.IDAAnalysis.plot_IDA_results(IDA_result, Stat=True, FigName=CFDir/'IDA.jpg')
