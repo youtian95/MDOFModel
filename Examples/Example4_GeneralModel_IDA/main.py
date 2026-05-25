@@ -13,22 +13,18 @@ from MDOFModel.analysis import IDA_2D
 from MDOFModel.analysis import Collapse
 from MDOFModel.models.GeneralModelWrapper import GeneralModelWrapper
 
-from Example_MRF_Model import build_model
+from Example_6Story_MRF_Model import BASE_NODES, FLOOR_NODES, STORY_HEIGHTS, build_model
 
-floor_nodes = [103, 203, 303, 403, 503, 603]             
-story_heights = [5000.0, 4000.0, 4000.0, 4000.0, 4000.0, 4000.0]
-base_nodes = [1, 2, 3, 4, 5]
-
-CFDir = Path(__file__).resolve().parent / "Output"
+CFDir = Path(__file__).resolve().parent / "Output_new"
 CFDir.mkdir(parents=True, exist_ok=True)
 
 # 创建普通模型的 Wrapper 实例
 wrapper_model = GeneralModelWrapper(
     build_model_func = build_model,
-    floor_nodes = floor_nodes,
-    story_heights = story_heights,
+    floor_nodes = FLOOR_NODES,
+    story_heights = STORY_HEIGHTS,
     dof = 1,                 
-    base_nodes = base_nodes,
+    base_nodes = BASE_NODES,
     g_factor = 9800.0,       # 记录波原始单位g乘以 9800.0 变成毫米 mm/s^2 
 )
 
@@ -40,7 +36,7 @@ if __name__ == '__main__':
     IM_list = np.linspace(0.1, 3.0, 10).tolist()
     
     IDA_obj = IDA_2D.IDAAnalysis(wrapper_model)
-    IDA_result = IDA_obj.Analyze(IM_list, records=IDA_2D.load_fema_records(bidir=True), NumPool=8)
+    IDA_result = IDA_obj.Analyze(IM_list, records=IDA_2D.load_fema_records(bidir=True), NumPool=8, DeltaT=0.2)
 
     # 保存完整 3D IDA 结果（含倒塌记录，供倒塌分析使用）
     IDA_obj.SaveToCSV(CFDir/'IDA_results.csv')

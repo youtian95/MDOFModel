@@ -1,7 +1,7 @@
 """
 Example 7 — 6 层钢矩形框架：自定义 EDP（柱截面应变）IDA 与 Pelicun 损失评估
 
-使用与 Example 6 相同的有限元模型（Example_MRF_Model.py），演示以下完整流程：
+使用复杂 6 层钢框架模型（Example_6Story_MRF_Model.py），演示以下完整流程：
 
   1. **GeneralModelWrapper 回调接口**：
      - ``extra_recorder_setup(tmp_dir)``：在每次动力分析开始前为各层代表性中柱
@@ -22,7 +22,7 @@ Example 7 — 6 层钢矩形框架：自定义 EDP（柱截面应变）IDA 与 P
   4. **损失评估**：目标 IM = 0.6 g（位于 3D IDA 插值区间 [0.4, 0.8] 内），
      执行 FEMA P-58 方法并汇总修复费用与时间。
 
-模型参数（来自 Example_MRF_Model.py）：
+模型参数（来自 Example_6Story_MRF_Model.py）：
   - 6 层钢矩形框架，柱 W650/W550/W450，梁 W450/W400
   - Y 方向层高：5000-4000-4000-4000-4000-4000 mm
   - 楼层面积 324 m²，单位体系 mm-N-s，g = 9800 mm/s²
@@ -49,7 +49,7 @@ _examples_dir = str(Path(__file__).resolve().parent.parent)
 if _examples_dir not in sys.path:
     sys.path.insert(0, _examples_dir)
 
-from Example_MRF_Model import build_model  # 6 层 MRF 建模函数（不含 ops.wipe）
+from Example_6Story_MRF_Model import BASE_NODES, FLOOR_NODES, STORY_HEIGHTS, build_model
 
 from MDOFModel.models.GeneralModelWrapper import GeneralModelWrapper
 from MDOFModel.analysis.IDA_2D import IDAAnalysis
@@ -68,13 +68,6 @@ REPLACEMENT_TIME = 365.0 * 250.0  # worker·day
 
 IM_LIST   = [0.4, 0.8]   # 2 个 IM 级别（节约运行时间）
 IM_TARGET = 0.6          # 损失评估目标 IM，位于 IDA 插值区间内
-
-# ── 模型节点与几何参数 ────────────────────────────────────────────────────────
-# 各层主控节点（col=3）：103, 203, …, 603
-FLOOR_NODES   = [i * 100 + 3 for i in range(1, NUM_OF_STORIES + 1)]
-BASE_NODES    = [1, 2, 3, 4, 5]
-# 层高 (mm)，由 Y_COORDS = [0, 5000, 9000, 13000, 17000, 21000, 25000] 差分
-STORY_HEIGHTS = [5000, 4000, 4000, 4000, 4000, 4000]
 
 # ── 柱应变 recorder 参数 ──────────────────────────────────────────────────
 COL_ELEMENTS = (10103, 10203, 10303, 10403, 10503, 10603)  # 各层代表性中柱单元编号
@@ -120,7 +113,7 @@ class ColStrainPostProcess:
         model.MaxColStrain = strains
 
 # ── 输出目录 ──────────────────────────────────────────────────────────────────
-OUT_DIR = Path(__file__).resolve().parent / 'Output'
+OUT_DIR = Path(__file__).resolve().parent / 'Output_new'
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 IDA_CSV      = OUT_DIR / 'IDA_results.csv'
@@ -219,6 +212,7 @@ if __name__ == '__main__':
         records  = pairs_5,
         ExtraEDP = {'STRAIN': 'MaxColStrain'},
         NumPool  = 5,
+        DeltaT   = 0.2
     )
     ida.SaveToCSV(str(IDA_CSV))
     print(f'  3D IDA 完成，共 {len(ida_result)} 行结果 → {IDA_CSV.name}')

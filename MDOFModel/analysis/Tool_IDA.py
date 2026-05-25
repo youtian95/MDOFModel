@@ -10,7 +10,7 @@ import pandas as pd
 from ..models import MDOF_LU as mlu
 from ..models import MDOF_CN as mcn
 from ..models import MDOFOpenSees as mops
-from . import IDA
+from . import IDA_2D as IDA
 
 # DesignInfo['Code'] = 'Hazus' / 'CN'
 def main_IDA(IM_list,NumofStories,FloorArea,StructuralType,

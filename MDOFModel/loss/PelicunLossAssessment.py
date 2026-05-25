@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 from pelicun.tools.DL_calculation import run_pelicun
 from pelicun import base as _pelicun_base
+from ..analysis import IDA_2D as _IDA_2D
 
 # EDP 短名 → Pelicun fragility CSV 所用的全名
 _EDP_DEMAND_TYPE = {
@@ -434,7 +435,6 @@ class PelicunLossAssessment:
         max_drift_y     = None
         max_accel_y     = None
         max_floor_vel_y = None
-        max_pgv_y       = None
         extra_edp       = {}
         extra_edp_y     = {}
 
@@ -449,20 +449,17 @@ class PelicunLossAssessment:
                 _is_3d = False
 
         if _is_3d:
-            from ..analysis import IDA_3D as _IDA_3D
             (MaxDrift, max_drift_y,
              MaxAccel, max_accel_y,
              MaxResDrift, _res_y,
              MaxFloorVel, max_floor_vel_y,
-             MaxPGV, max_pgv_y,
-             extra_edp, extra_edp_y) = _IDA_3D.interp_edp_from_ida_3D(
+             extra_edp, extra_edp_y) = _IDA_2D.interp_edp_from_ida_bidir(
                 IdaCsv, ImLevel, self.NumOfStories
             )
             MaxResDrift = np.maximum(MaxResDrift, _res_y)
         else:
-            from ..analysis import IDA as _IDA
-            (MaxDrift, MaxAccel, MaxResDrift, MaxFloorVel, MaxPGV, extra_edp) = (
-                _IDA.interp_edp_from_ida(IdaCsv, ImLevel, self.NumOfStories)
+            (MaxDrift, MaxAccel, MaxResDrift, MaxFloorVel, extra_edp) = (
+                _IDA_2D.interp_edp_from_ida(IdaCsv, ImLevel, self.NumOfStories)
             )
             extra_edp_y = extra_edp  # 2D 分析两方向共用同一组 EDP
 
@@ -477,10 +474,6 @@ class PelicunLossAssessment:
             np.clip(np.asarray(MaxFloorVel, dtype=float), 1e-8, None)
             if MaxFloorVel is not None else None
         )
-        max_pgv = (
-            np.clip(np.asarray(MaxPGV, dtype=float), 1e-8, None)
-            if MaxPGV is not None else None
-        )
         _N = self.SampleSize   # pelicun 从 IDA 样本拟合分布并重采到该数量
 
         # 输出文件夹：用户指定，或默认使用当前工作目录下的 pelicun_output
@@ -493,8 +486,6 @@ class PelicunLossAssessment:
             max_drift_y=max_drift_y,
             max_accel_y=max_accel_y,
             max_floor_vel_y=max_floor_vel_y,
-            max_pgv=max_pgv,
-            max_pgv_y=max_pgv_y,
             extra_edp=extra_edp if extra_edp else None,
             extra_edp_y=extra_edp_y if extra_edp_y else None,
         )
@@ -635,8 +626,6 @@ class PelicunLossAssessment:
         max_drift_y=None,
         max_accel_y=None,
         max_floor_vel_y=None,
-        max_pgv=None,
-        max_pgv_y=None,
         extra_edp=None,
         extra_edp_y=None,
     ) -> str:
@@ -717,18 +706,6 @@ class PelicunLossAssessment:
             columns.append('1-SA-0-1')
             units.append('g')
 
-        # 地面峰值速度 PGV：若提供则写入 demand.csv（地面层 loc=0，单位 mps）
-        pgv_x_arr = None
-        pgv_y_arr = None
-        if max_pgv is not None:
-            pgv_x_arr = np.asarray(max_pgv, dtype=float)
-            pgv_y_arr = (np.asarray(max_pgv_y, dtype=float)
-                         if max_pgv_y is not None else pgv_x_arr)
-            columns.append('1-PGV-0-1')
-            units.append('mps')
-            columns.append('1-PGV-0-2')
-            units.append('mps')
-
         # 用户自定义额外 EDP（来自 IDA ExtraEDP 参数）
         _extra_edp_data: list = []   # list of (edp_name, x_2d, y_2d)
         if extra_edp:
@@ -766,8 +743,6 @@ class PelicunLossAssessment:
                 row += list(pfv_x_2d[r]) + list(pfv_y_2d[r])
             if sa_arr is not None:
                 row += [sa_arr[r]]
-            if pgv_x_arr is not None:
-                row += [pgv_x_arr[r], pgv_y_arr[r]]
             for _, _x_2d, _y_2d in _extra_edp_data:
                 row += list(_x_2d[r]) + list(_y_2d[r])
             data_rows.append(row)

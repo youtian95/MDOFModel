@@ -14,18 +14,14 @@ if examples_dir not in sys.path:
     sys.path.insert(0, examples_dir)
 
 from MDOFModel.models.GeneralModelWrapper import GeneralModelWrapper
-from Example_MRF_Model import build_model
-
-floor_nodes = [103, 203, 303, 403, 503, 603]
-story_heights = [5000.0, 4000.0, 4000.0, 4000.0, 4000.0, 4000.0]
-base_nodes = [1, 2, 3, 4, 5]
+from Example_6Story_MRF_Model import BASE_NODES, FLOOR_NODES, STORY_HEIGHTS, build_model
 
 wrapper_model = GeneralModelWrapper(
     build_model_func=build_model,
-    floor_nodes=floor_nodes,
-    story_heights=story_heights,
+    floor_nodes=FLOOR_NODES,
+    story_heights=STORY_HEIGHTS,
     dof=1,
-    base_nodes=base_nodes,
+    base_nodes=BASE_NODES,
     g_factor=9800.0,
 )
 

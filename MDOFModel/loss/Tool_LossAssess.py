@@ -20,7 +20,7 @@ import numpy as np
 from ..models import MDOF_LU as mlu
 from ..models import MDOFOpenSees as mops
 from . import BldLossAssessment as bl
-from ..analysis import IDA
+from ..analysis import IDA_2D as IDA
 from ..utils import Alpha_CNcode as ACN
 
 def DynamicAnalysis_1Sim(NumofStories, FloorArea, StructuralType, OccupancyClass, DesignInfo, EQRecordFile, EQScaling, OutputDir, SelfCenteringEnhancingFactor):

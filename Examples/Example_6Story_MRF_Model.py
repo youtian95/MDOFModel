@@ -17,6 +17,11 @@ BEAM_SEC_TAGS = [None, 21, 22, 23, 24, 25, 26]
 COL_TRANSF_TAG = 1
 BEAM_TRANSF_TAG = 2
 
+FLOOR_NODES = [103, 203, 303, 403, 503, 603]
+STORY_HEIGHTS = [5000.0, 4000.0, 4000.0, 4000.0, 4000.0, 4000.0]
+BASE_NODES = [1, 2, 3, 4, 5]
+
+
 def create_frame_nodes_and_constraints() -> None:
     for story_idx, y in enumerate(Y_COORDS):
         for col_idx, x in enumerate(X_COORDS, start=1):
@@ -34,6 +39,7 @@ def create_frame_nodes_and_constraints() -> None:
             slave_node = story * 100 + col
             ops.equalDOF(master_node, slave_node, 1)
 
+
 def define_w_section(sec_id: int, mat_id: int, d: float, bf: float, tf: float, tw: float,
                      nfdw: int, nftw: int, nfbf: int, nftf: int) -> None:
     dw = d - 2.0 * tf
@@ -50,6 +56,7 @@ def define_w_section(sec_id: int, mat_id: int, d: float, bf: float, tf: float, t
     ops.patch("rect", mat_id, nftf, nfbf, y1, z1, y2, z4)
     ops.patch("rect", mat_id, nfdw, nftw, y2, z2, y3, z3)
     ops.patch("rect", mat_id, nftf, nfbf, y3, z1, y4, z4)
+
 
 def define_materials_and_sections() -> None:
     ops.uniaxialMaterial("Steel01", MAT_ID_STEEL, FY, ES, STEEL_B)
@@ -70,21 +77,22 @@ def define_materials_and_sections() -> None:
     define_w_section(25, MAT_ID_STEEL, 400.0, 200.0, 20.0, 16.0, nfdw, nftw, nfbf, nftf)
     define_w_section(26, MAT_ID_STEEL, 400.0, 200.0, 20.0, 16.0, nfdw, nftw, nfbf, nftf)
 
+
 def define_geometric_transformations() -> None:
     ops.geomTransf("PDelta", COL_TRANSF_TAG)
     ops.geomTransf("Linear", BEAM_TRANSF_TAG)
 
+
 def create_columns() -> None:
     for story in range(1, 7):
         sec_tag = COL_SEC_TAGS[story]
-        
-        # 为了避免 beamIntegration 在同一 tag 下抛出警告或错误，在此处进行 try 捕获 或 使用与单元同名的单独 tag
         for col in range(1, 6):
             ele_tag = 10000 + 100 * story + col
             node_i = (story - 1) * 100 + col
             node_j = story * 100 + col
             ops.beamIntegration("Lobatto", ele_tag, sec_tag, NP_INTEGRATION)
             ops.element("forceBeamColumn", ele_tag, node_i, node_j, COL_TRANSF_TAG, ele_tag)
+
 
 def create_standard_beams() -> None:
     for story in range(1, 7):
@@ -96,6 +104,7 @@ def create_standard_beams() -> None:
             ops.beamIntegration("Lobatto", ele_tag, sec_tag, NP_INTEGRATION)
             ops.element("forceBeamColumn", ele_tag, node_i, node_j, BEAM_TRANSF_TAG, ele_tag)
 
+
 def assign_story_masses(master_y_mass: float, slave_y_mass: float) -> None:
     for story in range(1, 7):
         total_mass = sum(load / G for load in P_LOADS)
@@ -105,6 +114,7 @@ def assign_story_masses(master_y_mass: float, slave_y_mass: float) -> None:
             if col == 3:
                 continue
             ops.mass(story * 100 + col, 0.0, slave_y_mass, 1.0e-9)
+
 
 def build_model() -> None:
     ops.model("basic", "-ndm", 2, "-ndf", 3)

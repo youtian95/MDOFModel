@@ -4,9 +4,8 @@
 **/.*
 
 Examples/*.txt
-Examples/*output/
-Examples/*/Output/
-Examples/Example*/Output/
+Examples/**/*output*/
+Examples/**/*Output*/
 
 .opensees_tmp/
 

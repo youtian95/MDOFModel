@@ -26,7 +26,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from . import ReadRecord
-from ..utils.record_utils import compute_sa as _compute_sa, compute_pgv as _compute_pgv
+from ..utils.record_utils import compute_sa as _compute_sa
 
 # ── 模型协议 & 标准列集合 ─────────────────────────────────────────────────────
 
@@ -43,11 +43,11 @@ class IDAModelProtocol(Protocol):
 
 # 用于识别自定义 EDP 列（排除这些标准列后即为自定义列）
 _STANDARD_COLS_1D = frozenset({
-    'IM', 'EQRecord', 'MaxDrift', 'MaxAbsAccel', 'MaxRelativeAccel', 'MaxAbsVel', 'ResDrift', 'PGV', 'Iffinish', 'tCurrent', 'TotalTime',
+    'IM', 'EQRecord', 'MaxDrift', 'MaxAbsAccel', 'MaxRelativeAccel', 'MaxAbsVel', 'ResDrift', 'Iffinish', 'tCurrent', 'TotalTime',
 })
 _STANDARD_COLS_2D = frozenset({
     'IM', 'EQRecord_X', 'EQRecord_Y',
-    'MaxDrift_X', 'MaxDrift_Y', 'MaxAbsAccel_X', 'MaxAbsAccel_Y', 'MaxAbsVel_X', 'MaxAbsVel_Y', 'PGV_X', 'PGV_Y', 'ResDrift_X', 'ResDrift_Y', 'Iffinish', 'Iffinish_X', 'Iffinish_Y', 'tCurrent_X', 'tCurrent_Y', 'TotalTime', '_pair',
+    'MaxDrift_X', 'MaxDrift_Y', 'MaxAbsAccel_X', 'MaxAbsAccel_Y', 'MaxAbsVel_X', 'MaxAbsVel_Y', 'ResDrift_X', 'ResDrift_Y', 'Iffinish', 'Iffinish_X', 'Iffinish_Y', 'tCurrent_X', 'tCurrent_Y', 'TotalTime', '_pair',
 })
 
 
@@ -251,15 +251,12 @@ def IDA_1record(
     name_x = Path(record_x).stem
     rec_name = f"{name_x}+{Path(record_y).stem}" if bidir else name_x
 
-    # 计算参考 Sa 及 PGV（双向取几何均值 Sa）
+    # 计算参考 Sa（双向取两分量几何均值）
     sa_x   = _compute_sa(record_x, period)
     Sa_ref = (math.sqrt(sa_x * _compute_sa(record_y, period))
               if bidir else sa_x)
     if Sa_ref <= 0:
         Sa_ref = 1e-9
-    pgv_x = _compute_pgv(record_x)
-    pgv_y = _compute_pgv(record_y) if bidir else None
-
     if not bidir:
         FEModel.UniqueRecorderPrefix = 'URP' + Path(record_x).name + '_'
 
@@ -275,8 +272,7 @@ def IDA_1record(
     for im_idx, IM in im_iter:
         # 多进程模式：第一条 IM 前先上报，供主进程创建子进度条
         if _status_queue is not None and im_idx == 0:
-            _status_queue.put({'record': rec_name, 'im_idx': 0, 'im_total': n_im,
-                               'IM': IM, 'finished': True, 'tCurrent': 0.0, 'TotalTime': 0.0})
+            _status_queue.put({'record': rec_name, 'im_idx': 0, 'im_total': n_im, 'IM': IM, 'finished': True, 'tCurrent': 0.0, 'TotalTime': 0.0})
 
         SF = IM / Sa_ref
 
@@ -317,7 +313,6 @@ def IDA_1record(
                 'MaxAbsAccel_Y': [list(FEM_Y.MaxAbsAccel)],
                 'MaxAbsVel_X':   [list(getattr(FEM_X, 'MaxAbsVel', []))],
                 'MaxAbsVel_Y':   [list(getattr(FEM_Y, 'MaxAbsVel', []))],
-                'PGV_X': pgv_x * SF, 'PGV_Y': pgv_y * SF,
                 'ResDrift_X': _to_scalar(FEM_X.ResDrift),
                 'ResDrift_Y': _to_scalar(FEM_Y.ResDrift),
                 'Iffinish': finished, 'Iffinish_X': bool(ok_x), 'Iffinish_Y': bool(ok_y),
@@ -339,7 +334,6 @@ def IDA_1record(
                 'MaxAbsAccel':      [FEModel.MaxAbsAccel],
                 'MaxRelativeAccel': [FEModel.MaxRelativeAccel],
                 'MaxAbsVel':        [getattr(FEModel, 'MaxAbsVel', [])],
-                'PGV': pgv_x * SF,
                 'ResDrift': FEModel.ResDrift, 'Iffinish': finished,
                 'tCurrent': t_cur, 'TotalTime': TotalTime,
             }
@@ -587,13 +581,12 @@ def interp_edp_from_ida(
     Returns
     -------
     tuple
-        ``(drift_mat, accel_mat, res_arr, vel_mat, pgv_arr, extra_dict)``
+        ``(drift_mat, accel_mat, res_arr, vel_mat, extra_dict)``
 
         - **drift_mat** ``(n, N)`` – 最大层间位移角
         - **accel_mat** ``(n, N+1)`` – 峰值楼面加速度（g），首列为地面层
         - **res_arr**   ``(n,)``   – 残余层间位移角
         - **vel_mat**   ``(n, N+1)`` – 峰值楼面速度（m/s）
-        - **pgv_arr**   ``(n,)`` or None – 峰值地面速度（m/s）
         - **extra_dict** ``dict`` – 用户自定义 EDP 插值结果
     """
     N = int(num_stories)
@@ -615,37 +608,38 @@ def interp_edp_from_ida(
         df[col] = df[col].apply(
             lambda v: _parse_ida_array(v) if isinstance(v, str) else np.asarray(v, dtype=float))
 
-    drift_rows, accel_rows, res_rows, vel_rows, pgv_rows = [], [], [], [], []
+    drift_rows, accel_rows, res_rows, vel_rows = [], [], [], []
     extra_rows = {c: [] for c in extra_cols}
 
     for _, rows in df.groupby('EQRecord', sort=False):
         drift = np.asarray(_interp_ida_value(rows, im_target, 'MaxDrift'), dtype=float)[:N]
-        accel = np.asarray(_interp_ida_value(rows, im_target, 'MaxAbsAccel'), dtype=float)[:N]
+        accel_full = np.asarray(_interp_ida_value(rows, im_target, 'MaxAbsAccel'), dtype=float)
         res   = _interp_ida_value(rows, im_target, 'ResDrift')
         res   = float(res) if not hasattr(res, '__len__') else float(np.max(res))
 
         drift_rows.append(drift)
-        accel_rows.append(accel)
+        accel_rows.append(accel_full)
         res_rows.append(res)
 
         if 'MaxAbsVel' in df.columns:
             vel = np.asarray(_interp_ida_value(rows, im_target, 'MaxAbsVel'), dtype=float)
             vel_rows.append(vel[:N + 1] if len(vel) >= N + 1 else np.concatenate([[0.0], vel[:N]]))
 
-        if 'PGV' in df.columns:
-            pgv_rows.append(float(_interp_ida_value(rows, im_target, 'PGV')))
-
         for col in extra_cols:
             if col in rows.columns:
                 extra_rows[col].append(np.asarray(_interp_ida_value(rows, im_target, col), dtype=float))
 
     drift_mat = np.clip(np.array(drift_rows, dtype=float), 1e-8, None)
-    accel_raw = np.clip(np.array(accel_rows, dtype=float), 1e-8, None)
-    accel_mat = np.hstack([np.full((len(accel_raw), 1), im_target * 0.4), accel_raw / 9800.0])
+    _accel_len = len(accel_rows[0]) if accel_rows else 0
+    if _accel_len < N + 1:
+        raise ValueError(
+            f"MaxAbsAccel 数组长度 {_accel_len}，需要包含地面节点（N+1={N + 1} 个元素），请检查 GeneralModelWrapper 版本。"
+        )
+    accel_arr = np.array([r[:N + 1] for r in accel_rows], dtype=float)
+    accel_mat = np.clip(accel_arr, 1e-8, None) / 9800.0
     res_arr   = np.clip(np.array(res_rows, dtype=float), 1e-8, None)
     vel_mat   = (np.clip(np.array(vel_rows, dtype=float) / 1000.0, 1e-8, None)
                  if vel_rows else np.full((len(drift_mat), N + 1), 10.0))
-    pgv_arr   = np.clip(np.array(pgv_rows, dtype=float), 1e-8, None) if pgv_rows else None
 
     extra_dict = {}
     for col, vals in extra_rows.items():
@@ -655,7 +649,7 @@ def interp_edp_from_ida(
             except (ValueError, TypeError):
                 pass
 
-    return drift_mat, accel_mat, res_arr, vel_mat, pgv_arr, extra_dict
+    return drift_mat, accel_mat, res_arr, vel_mat, extra_dict
 
 
 # ── EDP 插值（双向） ───────────────────────────────────────────────────────────
@@ -671,7 +665,7 @@ def interp_edp_from_ida_bidir(
     -------
     tuple
         ``(drift_X, drift_Y, accel_X, accel_Y, res_X, res_Y,
-           vel_X, vel_Y, pgv_X, pgv_Y, extra_x_dict, extra_y_dict)``
+              vel_X, vel_Y, extra_x_dict, extra_y_dict)``
 
         各矩阵形状：drift ``(n, N)``；accel/vel ``(n, N+1)``；res ``(n,)``。
     """
@@ -692,12 +686,19 @@ def interp_edp_from_ida_bidir(
         raise ValueError("双向 IDA 结果中没有收敛完成的记录。")
 
     has_vel = 'MaxAbsVel_X' in df.columns
-    has_pgv = 'PGV_X' in df.columns
+
+    # 地面节点为强制要求：MaxAbsAccel 必须包含 N+1 个元素（index 0 = 地面 PGA）
+    if 'MaxAbsAccel_X' in df.columns:
+        _sample_accel = np.asarray(df.iloc[0]['MaxAbsAccel_X'], dtype=float)
+        if len(_sample_accel) < N + 1:
+            raise ValueError(
+                f"MaxAbsAccel_X 数组长度 {len(_sample_accel)}，需要包含地面节点（N+1={N + 1} 个元素），请检查 GeneralModelWrapper 版本。"
+            )
 
     extra_bases = [c[:-2] for c in df.columns
                    if c not in _STANDARD_COLS_2D and c.endswith('_X')]
 
-    dX, dY, aX, aY, rX, rY, vX, vY, pX, pY = [], [], [], [], [], [], [], [], [], []
+    dX, dY, aX, aY, rX, rY, vX, vY = [], [], [], [], [], [], [], []
     eX = {b: [] for b in extra_bases}
     eY = {b: [] for b in extra_bases}
 
@@ -706,11 +707,10 @@ def interp_edp_from_ida_bidir(
         drift_x = np.asarray(_interp_ida_value(rows, im_target, 'MaxDrift_X'), dtype=float)[:N]
         drift_y = np.asarray(_interp_ida_value(rows, im_target, 'MaxDrift_Y'), dtype=float)[:N]
 
-        ax_raw = np.asarray(_interp_ida_value(rows, im_target, 'MaxAbsAccel_X'), dtype=float)[:N]
-        ay_raw = np.asarray(_interp_ida_value(rows, im_target, 'MaxAbsAccel_Y'), dtype=float)[:N]
-        gnd    = np.array([im_target * 0.4])
-        accel_x = np.concatenate([gnd, ax_raw / 9800.0])
-        accel_y = np.concatenate([gnd, ay_raw / 9800.0])
+        ax_full = np.asarray(_interp_ida_value(rows, im_target, 'MaxAbsAccel_X'), dtype=float)
+        ay_full = np.asarray(_interp_ida_value(rows, im_target, 'MaxAbsAccel_Y'), dtype=float)
+        accel_x = ax_full[:N + 1] / 9800.0
+        accel_y = ay_full[:N + 1] / 9800.0
 
         res_x = float(np.asarray(_interp_ida_value(rows, im_target, 'ResDrift_X'), dtype=float))
         res_y = float(np.asarray(_interp_ida_value(rows, im_target, 'ResDrift_Y'), dtype=float))
@@ -727,9 +727,6 @@ def interp_edp_from_ida_bidir(
         aX.append(accel_x); aY.append(accel_y)
         rX.append(res_x);   rY.append(res_y)
         vX.append(vel_x);   vY.append(vel_y)
-        if has_pgv:
-            pX.append(float(_interp_ida_value(rows, im_target, 'PGV_X')))
-            pY.append(float(_interp_ida_value(rows, im_target, 'PGV_Y')))
         for b in extra_bases:
             if b + '_X' in rows.columns:
                 eX[b].append(np.asarray(_interp_ida_value(rows, im_target, b + '_X'), dtype=float))
@@ -741,8 +738,6 @@ def interp_edp_from_ida_bidir(
     accel_X, accel_Y = clip(aX), clip(aY)
     res_X,   res_Y   = clip(rX), clip(rY)
     vel_X,   vel_Y   = clip(vX), clip(vY)
-    pgv_X = clip(pX) if pX else None
-    pgv_Y = clip(pY) if pY else None
 
     def _build_extra(src):
         out = {}
@@ -754,7 +749,8 @@ def interp_edp_from_ida_bidir(
                     pass
         return out
 
-    return (drift_X, drift_Y, accel_X, accel_Y, res_X, res_Y,vel_X, vel_Y, pgv_X, pgv_Y, _build_extra(eX), _build_extra(eY))
+    return (drift_X, drift_Y, accel_X, accel_Y, res_X, res_Y,
+            vel_X, vel_Y, _build_extra(eX), _build_extra(eY))
 
 
 # ── 双向结果转单向包络（供 Hazus 等单向模块使用） ─────────────────────────────

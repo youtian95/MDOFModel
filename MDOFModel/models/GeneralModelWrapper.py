@@ -32,19 +32,27 @@ class GeneralModelWrapper:
     """list[float]: 单次动力分析完成后提取的各楼层最大层间位移角。格式为浮点数列表，长度对应总楼层数量（如 [一层角, 二层角, ...]）。"""
     
     MaxAbsAccel: list = []
-    """list[float]: 单次动力分析完成后提取的各楼层最大绝对加速度（默认单位 mm/s²，含地面运动激励参数）。格式为浮点数列表，长度对应楼层数量。"""
+    """list[float]: 单次动力分析完成后提取的各层最大绝对加速度（默认单位 mm/s²）。
+    若提供了 base_nodes，列表长度 = len(floor_nodes) + 1，index 0 为地面 PGA，其余为各楼层绝对加速度；
+    未提供 base_nodes 时长度 = len(floor_nodes)，不含地面值。
+    """
     
     MaxRelativeAccel: list = []
-    """list[float]: 单次动力分析完成后提取的各楼层最大相对加速度（默认单位 mm/s²，相对底部的自身加速度）。格式为浮点数列表，长度对应楼层数量。"""    
+    """list[float]: 单次动力分析完成后提取的各层最大相对加速度（默认单位 mm/s²，相对地面的加速度）。
+    若提供了 base_nodes，列表长度 = len(floor_nodes) + 1，index 0 为地面节点相对加速度（恒为 0），其余为各楼层相对加速度；
+    未提供 base_nodes 时长度 = len(floor_nodes)，不含地面值。
+    """    
 
     MaxAbsVel: list = []
-    """list[float]: 单次动力分析完成后提取的各楼层最大绝对速度（默认单位 mm/s）。
-    列表长度 = len(floor_nodes)，不含地面层。
+    """list[float]: 单次动力分析完成后提取的各层最大绝对速度（默认单位 mm/s）。
+    若提供了 base_nodes，列表长度 = len(floor_nodes) + 1，index 0 为地面 PGV，其余为各楼层绝对速度；
+    未提供 base_nodes 时长度 = len(floor_nodes)，不含地面值。
     """    
 
     MaxRelativeVel: list = []
-    """list[float]: 单次动力分析完成后提取的各楼层最大相对速度（默认单位 mm/s，相对地面的速度）。
-    列表长度 = len(floor_nodes)，不含地面层。
+    """list[float]: 单次动力分析完成后提取的各层最大相对速度（默认单位 mm/s，相对地面的速度）。
+    若提供了 base_nodes，列表长度 = len(floor_nodes) + 1，index 0 为地面节点相对速度（恒为 0），其余为各楼层相对速度；
+    未提供 base_nodes 时长度 = len(floor_nodes)，不含地面值。
     """
 
     ResDrift: float = 0.0
@@ -289,15 +297,22 @@ class GeneralModelWrapper:
         abs_vel_env_file   = _tmp_dir / "abs_vel_env.out"
         rel_vel_env_file   = _tmp_dir / "rel_vel_env.out"
 
+        # 加速度/速度 Recorder 节点列表：index 0 为地面节点（取 base_nodes[0]，若有），其余为各楼层节点
+        # 地面节点（固定，相对加速度/速度 = 0）：
+        #   accel + timeSeries 111 → PGA；vel + timeSeries 112 → PGV
+        # 楼层节点（index 1+）：
+        #   accel + timeSeries 111 → 绝对加速度；vel + timeSeries 112 → 绝对速度
+        #   不加 timeSeries → 相对加速度/速度（相对地面）
+        _gnd_node = self._base_nodes[0] if self._base_nodes else None
+        _acc_vel_nodes = ([_gnd_node] + self._floor_nodes) if _gnd_node is not None else self._floor_nodes
+
         # 位移时程（供层间漂移和残余漂移后处理）
         ops.recorder("Node", "-file", disp_file.as_posix(), "-time", "-node", *self._floor_nodes, "-dof", self._dof, "disp")
         # EnvelopeNode 直接输出 min/max/absMax 三行，避免保存完整加速度/速度时程
-        # accel + timeSeries 111（地面加速度）= 绝对加速度；不加 timeSeries = 相对加速度
-        # vel   + timeSeries 112（地面速度）  = 绝对速度；  不加 timeSeries = 相对速度
-        ops.recorder("EnvelopeNode", "-file", abs_accel_env_file.as_posix(), "-timeSeries", 111, "-node", *self._floor_nodes, "-dof", self._dof, "accel")
-        ops.recorder("EnvelopeNode", "-file", rel_accel_env_file.as_posix(),                     "-node", *self._floor_nodes, "-dof", self._dof, "accel")
-        ops.recorder("EnvelopeNode", "-file", abs_vel_env_file.as_posix(),   "-timeSeries", 112, "-node", *self._floor_nodes, "-dof", self._dof, "vel")
-        ops.recorder("EnvelopeNode", "-file", rel_vel_env_file.as_posix(),                       "-node", *self._floor_nodes, "-dof", self._dof, "vel")
+        ops.recorder("EnvelopeNode", "-file", abs_accel_env_file.as_posix(), "-timeSeries", 111, "-node", *_acc_vel_nodes, "-dof", self._dof, "accel")
+        ops.recorder("EnvelopeNode", "-file", rel_accel_env_file.as_posix(),                     "-node", *_acc_vel_nodes, "-dof", self._dof, "accel")
+        ops.recorder("EnvelopeNode", "-file", abs_vel_env_file.as_posix(),   "-timeSeries", 112, "-node", *_acc_vel_nodes, "-dof", self._dof, "vel")
+        ops.recorder("EnvelopeNode", "-file", rel_vel_env_file.as_posix(),                       "-node", *_acc_vel_nodes, "-dof", self._dof, "vel")
 
         base_disp_file = None
         if self._base_nodes:
@@ -512,9 +527,14 @@ class GeneralModelWrapper:
         )
 
     def _post_process(self, disp_file, abs_accel_env_file, rel_accel_env_file, abs_vel_env_file, rel_vel_env_file, base_disp_file):
-        """从 EnvelopeNode 文件直接读取加速度/速度最大值；从位移时程中计算最大层间漂移和残余漂移。"""
+        """从 EnvelopeNode 文件直接读取加速度/速度最大值；从位移时程中计算最大层间漂移和残余漂移。
+        
+        加速度/速度数组长度始终为 n+1（地面节点 index 0 + n 个楼层），
+        其中 index 0 为地面值（PGA / PGV / 0）。
+        """
         n = len(self._floor_nodes)
-        zeros = [0.0] * n
+        n_out = n + 1
+        zeros = [0.0] * n_out
 
         def _read_env_absmax(path):
             """读取 EnvelopeNode 输出文件的 absMax 行（第3行），返回浮点列表；失败则返回 None。"""
@@ -534,19 +554,19 @@ class GeneralModelWrapper:
 
         self.MaxAbsAccel      = abs_accel if abs_accel is not None else zeros[:]
         self.MaxRelativeAccel = rel_accel if rel_accel is not None else zeros[:]
-        self.MaxAbsVel        = abs_vel   if abs_vel   is not None else [1e-6] * n
-        self.MaxRelativeVel   = rel_vel   if rel_vel   is not None else [1e-6] * n
+        self.MaxAbsVel        = abs_vel   if abs_vel   is not None else [1e-6] * n_out
+        self.MaxRelativeVel   = rel_vel   if rel_vel   is not None else [1e-6] * n_out
 
         # ── 位移时程：最大层间漂移 + 残余漂移 ──────────────────────────────
         try:
             disp_data = np.loadtxt(disp_file)
         except Exception:
-            self.MaxDrift = zeros[:]
+            self.MaxDrift = [0.0] * n
             self.ResDrift = 0.0
             return
 
         if disp_data.size == 0:
-            self.MaxDrift = zeros[:]
+            self.MaxDrift = [0.0] * n
             self.ResDrift = 0.0
             return
 

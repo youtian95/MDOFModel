@@ -1,5 +1,12 @@
 # 更新日志
 
+## [0.8.0] - 2026-05-25
+
+- [x] 不需要通过积分计算地面速度，MaxAbsVel本身就可以记录
+- [x] 修复大BUG：GeneralModelWrapper.py 中速度和加速度记录的第0个都应该是地面，所以速度和加速度的数量都应该比Drift多1个。Pelicun的损失评估中，也有相应需要修改的地方。删除compute_pgv函数，直接记录MaxAbsVel。
+- [x] 删除IDA_3D.py和IDA.py。
+- [x] 将`Examples\Example_MRF_Model.py`改为一个非常简单的糖葫芦串模型。
+
 ## [0.7.0] - 2026-05-23
 
 - [x] 合并 `IDA_3D.py` 和 `IDA.py` 模块，为`IDA_2D.py`，因为都是针对平面结构的分析，区别在于是否记录双向EDP。
