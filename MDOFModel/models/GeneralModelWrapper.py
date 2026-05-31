@@ -330,7 +330,7 @@ class GeneralModelWrapper:
         ops.integrator("Newmark", 0.5, 0.25)
         ops.test('NormDispIncr', 1.0e-3, 100, 0)
         ops.algorithm("Newton")
-        ops.analysis("Transient", "-numSubLevels", 5, "-numSubSteps", 2)
+        ops.analysis("VariableTransient", "-numSubLevels", 4, "-numSubSteps", 2)
         
         n_steps = int((nPts * dt_gm) / ana_dt)
         finished = True

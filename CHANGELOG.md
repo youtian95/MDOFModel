@@ -1,5 +1,9 @@
 # 更新日志
 
+## [0.8.1] - 2026-05-31
+
+- 把动力分析改为可变步长 `ops.analysis("VariableTransient", "-numSubLevels", 4, "-numSubSteps", 2)`
+
 ## [0.8.0] - 2026-05-25
 
 - [x] 不需要通过积分计算地面速度，MaxAbsVel本身就可以记录
