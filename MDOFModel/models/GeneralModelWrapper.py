@@ -1,3 +1,10 @@
+"""将通用OpenSees模型包装为IDA可重复调用的模型，并记录动力需求。
+
+流程：模型工厂重建→重力→模态/阻尼→时程输入→按目标时刻积分→读取EDP。
+输入：建模函数、楼层节点/层高、地震记录和调幅系数；输出：收敛状态、实际终止时间和楼层需求属性。
+动力分析使用Transient失败子步细分；切换算法时只推进到同一个目标时刻，不重复计算已提交子步。
+"""
+
 import openseespy.opensees as ops
 import numpy as np
 from pathlib import Path
@@ -22,6 +29,13 @@ class GeneralModelWrapper:
     """
 
     # === 公开属性 (供 IDA 或外部提取的结果与配置) ===
+    # 动力求解默认参数；通过实例同名属性覆盖，不与重力、推覆参数共用。
+    DYNAMIC_TOLERANCE: float = 1.0e-3  # 正常动力分析的位移增量范数容差。
+    DYNAMIC_FALLBACK_TOLERANCE: float = 1.0e-2  # 算法回退时的容差。
+    DYNAMIC_MAX_ITERATIONS: int = 100  # 每个试步允许的最大平衡迭代次数。
+    DYNAMIC_SUBLEVELS: int = 4  # 失败时间步的最大细分层数。
+    DYNAMIC_SUBSTEPS: int = 2  # 每层把失败时间段等分的数量。
+
     UniqueRecorderPrefix: str = "General_"
     """str: 多进程并发分析时的记录器输出文件前缀，用于避免不同进程间产生文件读写冲突。"""
 
@@ -328,9 +342,10 @@ class GeneralModelWrapper:
         ops.numberer("RCM")
         ops.constraints("Transformation")
         ops.integrator("Newmark", 0.5, 0.25)
-        ops.test('NormDispIncr', 1.0e-3, 100, 0)
+        ops.test('NormDispIncr', self.DYNAMIC_TOLERANCE, self.DYNAMIC_MAX_ITERATIONS, 0)
         ops.algorithm("Newton")
-        ops.analysis("VariableTransient", "-numSubLevels", 4, "-numSubSteps", 2)
+        # 子步细分参数属于Transient；VariableTransient配合两参数analyze不会启用该机制。
+        ops.analysis("Transient", "-numSubLevels", self.DYNAMIC_SUBLEVELS, "-numSubSteps", self.DYNAMIC_SUBSTEPS)
         
         n_steps = int((nPts * dt_gm) / ana_dt)
         finished = True
@@ -357,6 +372,7 @@ class GeneralModelWrapper:
         # 定义一个简单的进度输出间隔以避免刷屏，例如每 5% 刷新一次控制台打印
         progress_interval = max(1, n_steps // 20)
 
+        analysis_start_time = float(ops.getTime())
         for step in range(n_steps):
             
             if show_progress and (step % progress_interval == 0 or step == n_steps - 1):
@@ -364,18 +380,25 @@ class GeneralModelWrapper:
                 sys.stdout.write(f"\r[{self.UniqueRecorderPrefix}] Dynamic Analysis: [{int(percent / 5) * '#'}{'.' * (20 - int(percent / 5))}] {percent:.1f}% (Step {step+1}/{n_steps})")
                 sys.stdout.flush()
 
-            ok = ops.analyze(1, ana_dt)
-
-            if ok != 0:
-                # Fallback
-                ops.algorithm('KrylovNewton')
-                ops.test('NormDispIncr', 1.0e-2, 100, 0)
-                ok = ops.analyze(1, ana_dt)
-                if ok != 0:
-                    ops.algorithm('ModifiedNewton')
-                    ok = ops.analyze(1, ana_dt)
-                ops.test('NormDispIncr', 1.0e-3, 100, 0)
-                ops.algorithm('Newton')
+            # 子步可能已部分提交；重试始终指向原目标时刻，而不是重新推进完整ana_dt。
+            target_time = analysis_start_time + (step + 1) * ana_dt
+            ok = 0
+            try:
+                # 保留原有默认/回退准则；部分子步已提交时，只补到同一个目标时刻。
+                for algorithm, tolerance in (("Newton", self.DYNAMIC_TOLERANCE), ("KrylovNewton", self.DYNAMIC_FALLBACK_TOLERANCE), ("ModifiedNewton", self.DYNAMIC_FALLBACK_TOLERANCE)):
+                    remaining = target_time - float(ops.getTime())
+                    if remaining <= 1.0e-12 * max(1.0, abs(target_time)):
+                        ok = 0
+                        break
+                    ops.algorithm(algorithm)
+                    ops.test("NormDispIncr", tolerance, self.DYNAMIC_MAX_ITERATIONS, 0)
+                    ok = ops.analyze(1, remaining)
+                    if ok == 0:
+                        break
+            finally:
+                # 包括异常退出在内，下一名义步仍从默认Newton和原容差开始。
+                ops.test("NormDispIncr", self.DYNAMIC_TOLERANCE, self.DYNAMIC_MAX_ITERATIONS, 0)
+                ops.algorithm("Newton")
                 
             if ok != 0:
                 finished = False

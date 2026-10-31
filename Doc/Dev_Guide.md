@@ -44,5 +44,5 @@ pip install build twine
 3. **上传到 PyPI**
 
    ```bash
-   python -m twine upload dist/*
+   python -m twine upload dist/mdofmodel-x.x.x*
    ```

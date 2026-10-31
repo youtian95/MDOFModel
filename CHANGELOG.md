@@ -1,5 +1,11 @@
 # 更新日志
 
+## [0.8.2] - 2026-10-31
+
+- 动力容差、回退容差、最大迭代次数及子步细分参数改为 `DYNAMIC_*` 类属性，支持实例覆盖；不影响重力和推覆设置。
+- 修复通用wrapper的失败子步设置：使用 `Transient -numSubLevels 4 -numSubSteps 2`，替代未生效的 `VariableTransient` 参数组合。
+- 切换Newton/KrylovNewton/ModifiedNewton时仅推进至当前步的原目标时刻，避免部分子步已提交后再次推进完整时间增量；保持原有收敛容差和迭代上限。
+
 ## [0.8.1] - 2026-05-31
 
 - 把动力分析改为可变步长 `ops.analysis("VariableTransient", "-numSubLevels", 4, "-numSubSteps", 2)`
